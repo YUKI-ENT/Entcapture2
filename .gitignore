@@ -1,0 +1,7 @@
+artifacts/
+/.vs
+/src/ENTcapture2.Core/bin
+/src/ENTcapture2.Core/obj
+/src/ENTcapture2.WinForms/bin
+/src/ENTcapture2.WinForms/obj
+/OpenCV_CS_TemporaryKey.pfx

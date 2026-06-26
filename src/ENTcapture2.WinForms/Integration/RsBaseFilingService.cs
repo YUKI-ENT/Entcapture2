@@ -1,0 +1,314 @@
+using System.Diagnostics;
+using ENTcapture2.Core.Models;
+using ENTcapture2.WinForms.Capture;
+
+namespace ENTcapture2.WinForms.Integration;
+
+internal sealed class RsBaseFilingService
+{
+    private static readonly HttpClient HttpClient = new()
+    {
+        Timeout = TimeSpan.FromSeconds(10)
+    };
+
+    public async Task<IReadOnlyList<string>> FileRecordingAsync(
+        IReadOnlyList<string> sourceFiles,
+        ApplicationSettings settings,
+        bool fileVideo,
+        bool notifyRsBase,
+        IProgress<string>? progress = null,
+        CancellationToken cancellationToken = default)
+    {
+        var destinationFiles = new List<string>();
+        if (sourceFiles.Count == 0)
+        {
+            if (notifyRsBase)
+            {
+                await CallReloadUrlAsync(settings, cancellationToken);
+            }
+
+            return destinationFiles;
+        }
+
+        if (fileVideo)
+        {
+            Directory.CreateDirectory(settings.SnapshotDirectory);
+            for (int index = 0; index < sourceFiles.Count; index++)
+            {
+                string sourceFile = sourceFiles[index];
+                if (!File.Exists(sourceFile))
+                {
+                    continue;
+                }
+
+                long thresholdBytes =
+                    settings.ReencodeThresholdMegabytes <= 0
+                        ? long.MaxValue
+                        : settings.ReencodeThresholdMegabytes * 1024L * 1024L;
+                if (new FileInfo(sourceFile).Length > thresholdBytes)
+                {
+                    string destinationFile = GetAvailableDestinationPath(
+                        settings.SnapshotDirectory,
+                        Path.ChangeExtension(
+                            Path.GetFileName(sourceFile),
+                            ".mp4"));
+                    progress?.Report(
+                        $"動画を圧縮中 {index + 1}/{sourceFiles.Count}: " +
+                        Path.GetFileName(destinationFile));
+                    await ReencodeAsync(
+                        sourceFile,
+                        destinationFile,
+                        settings.FinalVideoCodec,
+                        settings.FinalVideoQuality,
+                        cancellationToken);
+                    destinationFiles.Add(destinationFile);
+                }
+                else
+                {
+                    string destinationFile = GetAvailableDestinationPath(
+                        settings.SnapshotDirectory,
+                        Path.GetFileName(sourceFile));
+                    progress?.Report(
+                        $"動画をコピー中 {index + 1}/{sourceFiles.Count}: " +
+                        Path.GetFileName(destinationFile));
+                    File.Copy(sourceFile, destinationFile);
+                    destinationFiles.Add(destinationFile);
+                }
+            }
+        }
+
+        if (notifyRsBase)
+        {
+            progress?.Report("RSBaseへ取込通知中...");
+            await CallReloadUrlAsync(settings, cancellationToken);
+        }
+
+        return destinationFiles;
+    }
+
+    public async Task NotifyRsBaseAsync(
+        ApplicationSettings settings,
+        CancellationToken cancellationToken = default)
+    {
+        if (!string.IsNullOrWhiteSpace(settings.RsBaseReloadUrl))
+        {
+            await CallReloadUrlAsync(settings, cancellationToken);
+        }
+    }
+
+    private static async Task ReencodeAsync(
+        string sourceFile,
+        string destinationFile,
+        string codec,
+        string quality,
+        CancellationToken cancellationToken)
+    {
+        using var process = new Process
+        {
+            StartInfo = FfmpegRuntime.CreateStartInfo()
+        };
+        string encoder = string.IsNullOrWhiteSpace(codec)
+            ? "libx264"
+            : codec.Trim();
+        FfmpegRuntime.Add(
+            process.StartInfo.ArgumentList,
+            "-hide_banner",
+            "-y",
+            "-i",
+            sourceFile,
+            "-map",
+            "0",
+            "-c:v",
+            encoder);
+        AddFinalVideoQualityArguments(
+            process.StartInfo.ArgumentList,
+            encoder,
+            quality);
+        FfmpegRuntime.Add(
+            process.StartInfo.ArgumentList,
+            "-c:a",
+            "aac",
+            "-b:a",
+            "128k",
+            "-movflags",
+            "+faststart",
+            destinationFile);
+        await RunAsync(process, cancellationToken);
+    }
+
+    private static void AddFinalVideoQualityArguments(
+        System.Collections.ObjectModel.Collection<string> arguments,
+        string encoder,
+        string quality)
+    {
+        (int crf, int maxrateKbps) = NormalizeFinalVideoQuality(quality);
+        string maxrate = $"{maxrateKbps}k";
+        string bufferSize = $"{maxrateKbps * 2}k";
+
+        switch (encoder)
+        {
+            case "libx264":
+                FfmpegRuntime.Add(
+                    arguments,
+                    "-preset",
+                    "veryfast",
+                    "-crf",
+                    crf.ToString(),
+                    "-maxrate",
+                    maxrate,
+                    "-bufsize",
+                    bufferSize);
+                break;
+            case "h264_nvenc":
+                FfmpegRuntime.Add(
+                    arguments,
+                    "-preset",
+                    "p4",
+                    "-rc",
+                    "vbr",
+                    "-cq",
+                    crf.ToString(),
+                    "-b:v",
+                    maxrate,
+                    "-maxrate",
+                    maxrate,
+                    "-bufsize",
+                    bufferSize);
+                break;
+            case "h264_qsv":
+                FfmpegRuntime.Add(
+                    arguments,
+                    "-preset",
+                    "veryfast",
+                    "-global_quality",
+                    crf.ToString(),
+                    "-maxrate",
+                    maxrate,
+                    "-bufsize",
+                    bufferSize);
+                break;
+            case "h264_amf":
+                FfmpegRuntime.Add(
+                    arguments,
+                    "-quality",
+                    "balanced",
+                    "-usage",
+                    "transcoding",
+                    "-rc",
+                    "vbr_peak",
+                    "-b:v",
+                    maxrate,
+                    "-maxrate",
+                    maxrate,
+                    "-bufsize",
+                    bufferSize);
+                break;
+            case "h264_mf":
+                FfmpegRuntime.Add(
+                    arguments,
+                    "-quality",
+                    Math.Clamp(100 - (crf * 2), 40, 90).ToString(),
+                    "-b:v",
+                    maxrate,
+                    "-maxrate",
+                    maxrate,
+                    "-bufsize",
+                    bufferSize);
+                break;
+            default:
+                FfmpegRuntime.Add(
+                    arguments,
+                    "-crf",
+                    crf.ToString(),
+                    "-maxrate",
+                    maxrate,
+                    "-bufsize",
+                    bufferSize);
+                break;
+        }
+    }
+
+    private static (int Crf, int MaxrateKbps) NormalizeFinalVideoQuality(
+        string quality)
+    {
+        return quality?.Trim() switch
+        {
+            "Size" => (26, 4000),
+            "High" => (20, 12000),
+            "Highest" => (18, 20000),
+            _ => (23, 8000)
+        };
+    }
+
+    private static async Task RunAsync(
+        Process process,
+        CancellationToken cancellationToken)
+    {
+        process.Start();
+        string error = await process.StandardError.ReadToEndAsync(cancellationToken);
+        await process.WaitForExitAsync(cancellationToken);
+        if (process.ExitCode != 0)
+        {
+            throw new InvalidOperationException(
+                FfmpegRuntime.SummarizeError(
+                    error,
+                    $"ffmpeg が終了コード {process.ExitCode} を返しました。"));
+        }
+    }
+
+    private static async Task CallReloadUrlAsync(
+        ApplicationSettings settings,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(settings.RsBaseReloadUrl))
+        {
+            return;
+        }
+
+        using HttpResponseMessage response = await HttpClient.GetAsync(
+            settings.RsBaseReloadUrl,
+            cancellationToken);
+        response.EnsureSuccessStatusCode();
+    }
+
+    private static string GetAvailableDestinationPath(
+        string directory,
+        string fileName)
+    {
+        string candidate = Path.Combine(directory, fileName);
+        if (!File.Exists(candidate))
+        {
+            return candidate;
+        }
+
+        string stem = Path.GetFileNameWithoutExtension(fileName);
+        string extension = Path.GetExtension(fileName);
+        string[] parts = stem.Split('~');
+        if (parts.Length >= 5 &&
+            int.TryParse(parts[1], out int serial))
+        {
+            for (int index = serial + 1; index <= 9999; index++)
+            {
+                parts[1] = index.ToString("D4");
+                candidate = Path.Combine(
+                    directory,
+                    string.Join("~", parts) + extension);
+                if (!File.Exists(candidate))
+                {
+                    return candidate;
+                }
+            }
+        }
+
+        int suffix = 1;
+        do
+        {
+            candidate = Path.Combine(
+                directory,
+                $"{stem}_{suffix++:D2}{extension}");
+        }
+        while (File.Exists(candidate));
+
+        return candidate;
+    }
+}

@@ -1293,36 +1293,46 @@ public partial class SettingsForm
         // 
         _addPresetButton.Location = new Point(3, 3);
         _addPresetButton.Name = "_addPresetButton";
-        _addPresetButton.Size = new Size(75, 23);
+        _addPresetButton.Size = new Size(63, 28);
         _addPresetButton.TabIndex = 0;
+        _addPresetButton.Text = "追加";
+        _addPresetButton.Click += AddPresetButton_Click;
         // 
         // _duplicatePresetButton
         // 
-        _duplicatePresetButton.Location = new Point(84, 3);
+        _duplicatePresetButton.Location = new Point(72, 3);
         _duplicatePresetButton.Name = "_duplicatePresetButton";
-        _duplicatePresetButton.Size = new Size(75, 23);
+        _duplicatePresetButton.Size = new Size(63, 28);
         _duplicatePresetButton.TabIndex = 1;
+        _duplicatePresetButton.Text = "複製";
+        _duplicatePresetButton.Click += DuplicatePresetButton_Click;
         // 
         // _deletePresetButton
         // 
-        _deletePresetButton.Location = new Point(3, 32);
+        _deletePresetButton.Location = new Point(141, 3);
         _deletePresetButton.Name = "_deletePresetButton";
-        _deletePresetButton.Size = new Size(75, 23);
+        _deletePresetButton.Size = new Size(63, 28);
         _deletePresetButton.TabIndex = 2;
+        _deletePresetButton.Text = "削除";
+        _deletePresetButton.Click += DeletePresetButton_Click;
         // 
         // _moveUpButton
         // 
-        _moveUpButton.Location = new Point(84, 32);
+        _moveUpButton.Location = new Point(3, 37);
         _moveUpButton.Name = "_moveUpButton";
-        _moveUpButton.Size = new Size(75, 23);
+        _moveUpButton.Size = new Size(63, 28);
         _moveUpButton.TabIndex = 3;
+        _moveUpButton.Text = "上へ";
+        _moveUpButton.Click += MovePresetButton_Click;
         // 
         // _moveDownButton
         // 
-        _moveDownButton.Location = new Point(3, 61);
+        _moveDownButton.Location = new Point(72, 37);
         _moveDownButton.Name = "_moveDownButton";
-        _moveDownButton.Size = new Size(75, 23);
+        _moveDownButton.Size = new Size(63, 28);
         _moveDownButton.TabIndex = 4;
+        _moveDownButton.Text = "下へ";
+        _moveDownButton.Click += MovePresetButton_Click;
         // 
         // presetEditorPanel
         // 

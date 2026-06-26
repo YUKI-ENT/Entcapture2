@@ -273,7 +273,8 @@ internal sealed class ClipExportService
         }
 
         FfmpegRuntime.Add(arguments, "-an", "-c:v", encoder);
-        if (options.BitrateKbps > 0)
+        if (options.RateControl == ClipExportRateControl.Bitrate &&
+            options.BitrateKbps > 0)
         {
             int bitrateKbps = Math.Clamp(options.BitrateKbps, 500, 200000);
             FfmpegRuntime.Add(
@@ -285,6 +286,10 @@ internal sealed class ClipExportService
                 "-bufsize",
                 $"{Math.Max(1000, bitrateKbps * 2)}k");
         }
+        else if (options.RateControl == ClipExportRateControl.Quality)
+        {
+            AddQualityArguments(arguments, encoder, options.Quality);
+        }
 
         string pixelFormat = encoder.Equals(
             "mjpeg",
@@ -295,7 +300,117 @@ internal sealed class ClipExportService
         FfmpegRuntime.AddEncoderArguments(
             arguments,
             encoder,
-            bitrateControlled: options.BitrateKbps > 0);
+            bitrateControlled:
+                options.RateControl is
+                    ClipExportRateControl.Bitrate or
+                    ClipExportRateControl.Quality);
+    }
+
+    private static void AddQualityArguments(
+        Collection<string> arguments,
+        string encoder,
+        string quality)
+    {
+        (int crf, int maxrateKbps) = NormalizeQuality(quality);
+        string maxrate = $"{maxrateKbps}k";
+        string bufferSize = $"{maxrateKbps * 2}k";
+
+        switch (encoder)
+        {
+            case "mjpeg":
+                FfmpegRuntime.Add(arguments, "-q:v", ToMjpegQuality(crf).ToString());
+                break;
+            case "h264_nvenc":
+                FfmpegRuntime.Add(
+                    arguments,
+                    "-preset",
+                    "p4",
+                    "-rc",
+                    "vbr",
+                    "-cq",
+                    crf.ToString(),
+                    "-b:v",
+                    maxrate,
+                    "-maxrate",
+                    maxrate,
+                    "-bufsize",
+                    bufferSize);
+                break;
+            case "h264_qsv":
+                FfmpegRuntime.Add(
+                    arguments,
+                    "-preset",
+                    "veryfast",
+                    "-global_quality",
+                    crf.ToString(),
+                    "-maxrate",
+                    maxrate,
+                    "-bufsize",
+                    bufferSize);
+                break;
+            case "h264_amf":
+                FfmpegRuntime.Add(
+                    arguments,
+                    "-quality",
+                    "balanced",
+                    "-usage",
+                    "transcoding",
+                    "-rc",
+                    "vbr_peak",
+                    "-b:v",
+                    maxrate,
+                    "-maxrate",
+                    maxrate,
+                    "-bufsize",
+                    bufferSize);
+                break;
+            case "h264_mf":
+                FfmpegRuntime.Add(
+                    arguments,
+                    "-quality",
+                    Math.Clamp(100 - (crf * 2), 40, 90).ToString(),
+                    "-b:v",
+                    maxrate,
+                    "-maxrate",
+                    maxrate,
+                    "-bufsize",
+                    bufferSize);
+                break;
+            default:
+                FfmpegRuntime.Add(
+                    arguments,
+                    "-preset",
+                    "veryfast",
+                    "-crf",
+                    crf.ToString(),
+                    "-maxrate",
+                    maxrate,
+                    "-bufsize",
+                    bufferSize);
+                break;
+        }
+    }
+
+    private static (int Crf, int MaxrateKbps) NormalizeQuality(string quality)
+    {
+        return quality?.Trim() switch
+        {
+            "Size" => (26, 4000),
+            "High" => (20, 12000),
+            "Highest" => (18, 20000),
+            _ => (23, 8000)
+        };
+    }
+
+    private static int ToMjpegQuality(int crf)
+    {
+        return crf switch
+        {
+            <= 18 => 2,
+            <= 20 => 3,
+            <= 23 => 5,
+            _ => 8
+        };
     }
 
     private static async Task ConcatAsync(
@@ -441,11 +556,24 @@ internal enum ClipExportMode
     Reencode
 }
 
+internal enum ClipExportRateControl
+{
+    Quality,
+    Bitrate
+}
+
 internal sealed record ClipExportOptions(
     ClipExportMode Mode,
     string EncoderName,
-    int BitrateKbps)
+    ClipExportRateControl RateControl,
+    int BitrateKbps,
+    string Quality)
 {
     public static ClipExportOptions Copy { get; } =
-        new(ClipExportMode.Copy, string.Empty, 0);
+        new(
+            ClipExportMode.Copy,
+            string.Empty,
+            ClipExportRateControl.Bitrate,
+            0,
+            string.Empty);
 }

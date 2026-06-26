@@ -87,6 +87,14 @@ public sealed class VideoPlaybackService : IAsyncDisposable
         }
     }
 
+    public void Pause()
+    {
+        lock (_stateLock)
+        {
+            _isPaused = true;
+        }
+    }
+
     public void Seek(TimeSpan time)
     {
         lock (_stateLock)

@@ -1516,7 +1516,7 @@ public partial class MainForm
         Controls.Add(rootLayout);
         DoubleBuffered = true;
         ForeColor = Color.FromArgb(235, 241, 248);
-        Icon = ((Icon)resources.GetObject("$this.Icon"))!;
+        Icon = (Icon)resources.GetObject("$this.Icon");
         MinimumSize = new Size(1080, 700);
         Name = "MainForm";
         StartPosition = FormStartPosition.CenterScreen;

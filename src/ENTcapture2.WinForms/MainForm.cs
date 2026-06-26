@@ -227,21 +227,22 @@ public partial class MainForm : Form
         _refreshDevicesButton.MinimumSize = new Size(70, 24);
         _refreshDevicesButton.Size = new Size(82, 24);
         _refreshDevicesButton.Margin = new Padding(0, 1, 0, 0);
-        _toggleSidePanelButton.Text = "<";
+        _toggleSidePanelButton.Text = "＜ 補正";
         _toggleSidePanelButton.FillColor = Theme.SurfaceRaised;
         _toggleSidePanelButton.BackColor = Theme.SurfaceRaised;
         _toggleSidePanelButton.HoverColor = Theme.ButtonHover;
         _toggleSidePanelButton.ForeColor = Theme.Text;
         _toggleSidePanelButton.CornerRadius = 0;
+        _toggleSidePanelButton.StackTextVertically = true;
         _toggleSidePanelButton.Padding = Padding.Empty;
         _toggleSidePanelButton.Font = new Font(
-            "Segoe UI",
-            12F,
+            "Yu Gothic UI",
+            10F,
             FontStyle.Bold);
         _toggleSidePanelButton.TextAlign = ContentAlignment.MiddleCenter;
         _toggleSidePanelButton.Dock = DockStyle.None;
         _toggleSidePanelButton.Anchor = AnchorStyles.None;
-        _toggleSidePanelButton.Size = new Size(28, 72);
+        _toggleSidePanelButton.Size = new Size(30, 112);
         _toggleSidePanelButton.Margin = new Padding(1);
 
         ConfigureCard(filterCard);
@@ -939,7 +940,7 @@ public partial class MainForm : Form
         _managePresetsButton.Click += ManagePresetsButton_Click;
         _openPlaybackButton.Click += OpenPlaybackButton_Click;
         _toggleSidePanelButton.Click +=
-            (_, _) => ToggleSidePanel();
+            async (_, _) => await ToggleSidePanelAsync();
         _savePresetButton.Click += SavePresetButton_Click;
         _morePresetsDropDownButton.Click += MorePresetsDropDownButton_Click;
         _openSnapshotFolderButton.Click += OpenSnapshotFolderButton_Click;
@@ -2154,7 +2155,7 @@ public partial class MainForm : Form
         }
     }
 
-    private void ToggleSidePanel()
+    private async Task ToggleSidePanelAsync()
     {
         bool show = !sidePanel.Visible;
         workspaceLayout.SuspendLayout();
@@ -2162,7 +2163,7 @@ public partial class MainForm : Form
         {
             sidePanel.Visible = show;
             workspaceLayout.ColumnStyles[2].Width = show ? 310 : 0;
-            _toggleSidePanelButton.Text = show ? ">" : "<";
+            _toggleSidePanelButton.Text = show ? "＞" : "＜ 補正";
             _toggleSidePanelButton.AccessibleName = show
                 ? "詳細パネルを閉じる"
                 : "詳細パネルを開く";
@@ -2170,6 +2171,16 @@ public partial class MainForm : Form
         finally
         {
             workspaceLayout.ResumeLayout(true);
+        }
+
+        if (!show)
+        {
+            if (_whiteBalanceSelectionCheckBox.Checked)
+            {
+                _whiteBalanceSelectionCheckBox.Checked = false;
+            }
+
+            await SaveSelectedPresetAsync();
         }
     }
 
@@ -2278,10 +2289,18 @@ public partial class MainForm : Form
         string outputDirectory = Directory.Exists(_settings.SnapshotDirectory)
             ? _settings.SnapshotDirectory
             : Environment.GetFolderPath(Environment.SpecialFolder.MyVideos);
+        if (!_playbackService.IsPaused)
+        {
+            _playbackService.Pause();
+            UpdatePlaybackControlCaptions();
+        }
+
         UpdatePreviewTopMostState();
         using var dialog = new ClipEditorForm(
             _playbackFilePaths,
             outputDirectory,
+            _settings.FinalVideoCodec,
+            _settings.FinalVideoQuality,
             () => _lastPlaybackPosition,
             time => _playbackService.Seek(time),
             CaptureDisplayedImage,
@@ -3726,6 +3745,11 @@ public partial class MainForm : Form
     }
 
     private async void SavePresetButton_Click(object? sender, EventArgs e)
+    {
+        await SaveSelectedPresetAsync();
+    }
+
+    private async Task SaveSelectedPresetAsync()
     {
         if (_selectedPreset is null)
         {

@@ -12,9 +12,9 @@ public sealed class ApplicationSettings
         Environment.GetFolderPath(Environment.SpecialFolder.MyPictures),
         "ENTcapture2");
 
-    public int JpegQuality { get; set; } = 95;
+    public int JpegQuality { get; set; } = 100;
 
-    public int SnapshotDebounceMilliseconds { get; set; } = 800;
+    public int SnapshotDebounceMilliseconds { get; set; } = 500;
 
     public CaptureOperationMode CaptureMode { get; set; } =
         CaptureOperationMode.ContinuousTemporaryRecording;
@@ -63,7 +63,7 @@ public sealed class ApplicationSettings
     public string RsBaseTheptDirectory { get; set; } = @"C:\common";
 
     public string RsBaseReloadUrl { get; set; } =
-        "http://localhost/~rsn/2000";
+        "http://127.0.0.1/~rsn/2000.cgi?rs_base=auto_file==";
 
     public bool AutoFileToRsBase { get; set; }
 

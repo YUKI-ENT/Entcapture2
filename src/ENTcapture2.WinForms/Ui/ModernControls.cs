@@ -17,6 +17,14 @@ public sealed class ModernButton : Button
     [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
     public int CornerRadius { get; set; }
 
+    [Browsable(false)]
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+    public bool RotateTextClockwise { get; set; }
+
+    [Browsable(false)]
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+    public bool StackTextVertically { get; set; }
+
     public ModernButton()
     {
         FlatStyle = FlatStyle.Flat;
@@ -39,6 +47,18 @@ public sealed class ModernButton : Button
         using GraphicsPath path = Theme.RoundedRectangle(ClientRectangle, CornerRadius);
         using var brush = new SolidBrush(BackColor);
         paintEvent.Graphics.FillPath(brush, path);
+        if (StackTextVertically)
+        {
+            DrawStackedText(paintEvent.Graphics);
+            return;
+        }
+
+        if (RotateTextClockwise)
+        {
+            DrawRotatedText(paintEvent.Graphics);
+            return;
+        }
+
         TextRenderer.DrawText(
             paintEvent.Graphics,
             Text,
@@ -48,6 +68,60 @@ public sealed class ModernButton : Button
             TextFormatFlags.HorizontalCenter |
             TextFormatFlags.VerticalCenter |
             TextFormatFlags.EndEllipsis);
+    }
+
+    private void DrawRotatedText(Graphics graphics)
+    {
+        GraphicsState state = graphics.Save();
+        try
+        {
+            graphics.TranslateTransform(Width, 0);
+            graphics.RotateTransform(90F);
+            TextRenderer.DrawText(
+                graphics,
+                Text,
+                Font,
+                new Rectangle(0, 0, Height, Width),
+                ForeColor,
+                TextFormatFlags.HorizontalCenter |
+                TextFormatFlags.VerticalCenter |
+                TextFormatFlags.EndEllipsis);
+        }
+        finally
+        {
+            graphics.Restore(state);
+        }
+    }
+
+    private void DrawStackedText(Graphics graphics)
+    {
+        string text = Text.Replace(" ", string.Empty);
+        if (text.Length == 0)
+        {
+            return;
+        }
+
+        using var textBrush = new SolidBrush(ForeColor);
+        using StringFormat format = new()
+        {
+            Alignment = StringAlignment.Center,
+            LineAlignment = StringAlignment.Center
+        };
+
+        float lineHeight = Font.GetHeight(graphics) + 1F;
+        float totalHeight = lineHeight * text.Length;
+        float y = Math.Max(0F, (Height - totalHeight) / 2F);
+        float centerX = Width / 2F;
+        foreach (char character in text)
+        {
+            graphics.DrawString(
+                character.ToString(),
+                Font,
+                textBrush,
+                new RectangleF(0F, y, Width, lineHeight),
+                format);
+            y += lineHeight;
+        }
     }
 
     private void UpdateRegion()

@@ -82,7 +82,12 @@ public static class DirectShowDeviceCatalog
                 ref filterId,
                 out sourceObject);
 
-            sourceFilter = (IBaseFilter)sourceObject;
+            if (sourceObject is not IBaseFilter filter)
+            {
+                return resolutions;
+            }
+
+            sourceFilter = filter;
             capturePin =
                 DsFindPin.ByCategory(sourceFilter, PinCategory.Capture, 0)
                 ?? DsFindPin.ByDirection(sourceFilter, PinDirection.Output, 0);
@@ -139,6 +144,11 @@ public static class DirectShowDeviceCatalog
         catch (COMException)
         {
             // Some capture filters expose no IAMStreamConfig capability list.
+        }
+        catch (InvalidCastException)
+        {
+            // Some video input monikers do not expose IBaseFilter even though
+            // they are returned by the DirectShow video input category.
         }
         finally
         {

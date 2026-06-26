@@ -30,6 +30,9 @@ internal sealed class ClipEditorForm : Form
     private readonly Label _rangeLabel = new();
     private readonly ListBox _rangeListBox = new();
     private readonly ComboBox _encoderComboBox = new();
+    private readonly RadioButton _qualityModeRadioButton = new();
+    private readonly RadioButton _bitrateModeRadioButton = new();
+    private readonly ComboBox _qualityComboBox = new();
     private readonly NumericUpDown _bitrateInput = new();
     private readonly RadioButton _joinedRadioButton = new();
     private readonly RadioButton _separateRadioButton = new();
@@ -49,6 +52,8 @@ internal sealed class ClipEditorForm : Form
     public ClipEditorForm(
         IReadOnlyList<string> sourceFiles,
         string outputDirectory,
+        string defaultCodec,
+        string defaultQuality,
         Func<PlaybackPosition?> getPlaybackPosition,
         Action<TimeSpan> seekPlayback,
         Func<Bitmap?> capturePreview,
@@ -70,11 +75,14 @@ internal sealed class ClipEditorForm : Form
         ForeColor = Theme.Text;
         Font = Theme.BodyFont();
 
-        BuildLayout(outputDirectory);
+        BuildLayout(outputDirectory, defaultCodec, defaultQuality);
         UpdatePresentation();
     }
 
-    private void BuildLayout(string outputDirectory)
+    private void BuildLayout(
+        string outputDirectory,
+        string defaultCodec,
+        string defaultQuality)
     {
         var root = new TableLayoutPanel
         {
@@ -194,7 +202,7 @@ internal sealed class ClipEditorForm : Form
             AutoSize = true,
             Dock = DockStyle.Top,
             ColumnCount = 4,
-            RowCount = 3,
+            RowCount = 4,
             Margin = new Padding(0, 12, 0, 8)
         };
         optionGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 110F));
@@ -224,33 +232,56 @@ internal sealed class ClipEditorForm : Form
             [
                 new EncoderChoice("コピー（無劣化・高速）", string.Empty, false),
                 new EncoderChoice("H.264 自動", "AUTO", true),
+                new EncoderChoice("H.264 libx264", "libx264", true),
                 new EncoderChoice("H.264 NVENC", "NVENC", true),
                 new EncoderChoice("H.264 AMF", "AMF", true),
                 new EncoderChoice("H.264 QSV", "QSV", true),
+                new EncoderChoice("H.264 Media Foundation", "h264_mf", true),
                 new EncoderChoice("MJPEG", "mjpeg", true)
             ]);
-        _encoderComboBox.SelectedIndex = 1;
+        SelectEncoder(defaultCodec);
         optionGrid.Controls.Add(_encoderComboBox, 1, 1);
 
-        AddLabel(optionGrid, "ビットレート", 2, 1);
+        AddLabel(optionGrid, "制御", 2, 1);
+        _qualityModeRadioButton.Text = "品質";
+        _qualityModeRadioButton.Checked = true;
+        _qualityModeRadioButton.ForeColor = Theme.Text;
+        _bitrateModeRadioButton.Text = "ビットレート";
+        _bitrateModeRadioButton.ForeColor = Theme.Text;
+        var controlModePanel = new FlowLayoutPanel { AutoSize = true };
+        controlModePanel.Controls.Add(_qualityModeRadioButton);
+        controlModePanel.Controls.Add(_bitrateModeRadioButton);
+        optionGrid.Controls.Add(controlModePanel, 3, 1);
+
+        AddLabel(optionGrid, "品質", 0, 2);
+        _qualityComboBox.DropDownStyle = ComboBoxStyle.DropDownList;
+        _qualityComboBox.BackColor = Theme.SurfaceRaised;
+        _qualityComboBox.ForeColor = Theme.Text;
+        _qualityComboBox.FlatStyle = FlatStyle.Flat;
+        _qualityComboBox.Items.AddRange(
+            ["サイズ優先", "標準", "高品質", "最高品質"]);
+        _qualityComboBox.Text = ToFinalVideoQualityDisplayName(defaultQuality);
+        optionGrid.Controls.Add(_qualityComboBox, 1, 2);
+
+        AddLabel(optionGrid, "ビットレート", 2, 2);
         _bitrateInput.Minimum = 500;
         _bitrateInput.Maximum = 100000;
         _bitrateInput.Increment = 500;
         _bitrateInput.Value = 5000;
         _bitrateInput.BackColor = Theme.SurfaceRaised;
         _bitrateInput.ForeColor = Theme.Text;
-        optionGrid.Controls.Add(_bitrateInput, 3, 1);
+        optionGrid.Controls.Add(_bitrateInput, 3, 2);
 
-        AddLabel(optionGrid, "出力先", 0, 2);
+        AddLabel(optionGrid, "出力先", 0, 3);
         _outputDirectoryTextBox.Text = outputDirectory;
         _outputDirectoryTextBox.BackColor = Theme.SurfaceRaised;
         _outputDirectoryTextBox.ForeColor = Theme.Text;
         _outputDirectoryTextBox.BorderStyle = BorderStyle.FixedSingle;
         _outputDirectoryTextBox.Dock = DockStyle.Fill;
-        optionGrid.Controls.Add(_outputDirectoryTextBox, 1, 2);
+        optionGrid.Controls.Add(_outputDirectoryTextBox, 1, 3);
         optionGrid.SetColumnSpan(_outputDirectoryTextBox, 2);
         ConfigureButton(_browseButton, "参照...", Theme.SurfaceRaised);
-        optionGrid.Controls.Add(_browseButton, 3, 2);
+        optionGrid.Controls.Add(_browseButton, 3, 3);
 
         _commandPreviewTextBox.Dock = DockStyle.Fill;
         _commandPreviewTextBox.Multiline = true;
@@ -314,6 +345,9 @@ internal sealed class ClipEditorForm : Form
         };
         _playbackTrackBar.Scroll += PlaybackTrackBar_Scroll;
         _encoderComboBox.SelectedIndexChanged += (_, _) => UpdatePresentation();
+        _qualityModeRadioButton.CheckedChanged += (_, _) => UpdatePresentation();
+        _bitrateModeRadioButton.CheckedChanged += (_, _) => UpdatePresentation();
+        _qualityComboBox.SelectedIndexChanged += (_, _) => UpdatePresentation();
         _bitrateInput.ValueChanged += (_, _) => UpdatePresentation();
         _joinedRadioButton.CheckedChanged += (_, _) => UpdatePresentation();
         _separateRadioButton.CheckedChanged += (_, _) => UpdatePresentation();
@@ -666,7 +700,11 @@ internal sealed class ClipEditorForm : Form
         return new ClipExportOptions(
             ClipExportMode.Reencode,
             encoder,
-            decimal.ToInt32(_bitrateInput.Value));
+            _bitrateModeRadioButton.Checked
+                ? ClipExportRateControl.Bitrate
+                : ClipExportRateControl.Quality,
+            decimal.ToInt32(_bitrateInput.Value),
+            FromFinalVideoQualityDisplayName(_qualityComboBox.Text));
     }
 
     private TimeSpan? GetTrackBarTime()
@@ -741,17 +779,31 @@ internal sealed class ClipEditorForm : Form
         }
 
         var choice = (EncoderChoice?)_encoderComboBox.SelectedItem;
-        _bitrateInput.Enabled = choice?.Reencode == true;
+        bool canConfigureReencode = choice?.Reencode == true;
+        _qualityModeRadioButton.Enabled = canConfigureReencode;
+        _bitrateModeRadioButton.Enabled = canConfigureReencode;
+        _qualityComboBox.Enabled =
+            canConfigureReencode && _qualityModeRadioButton.Checked;
+        _bitrateInput.Enabled =
+            canConfigureReencode && _bitrateModeRadioButton.Checked;
         TimeSpan selectedDuration = TimeSpan.FromTicks(
             exportRanges.Sum(range => (range.End - range.Start).Ticks));
         long sourceSizeBytes = GetSourceSizeBytes();
         string sourceSizeText = FormatFileSize(sourceSizeBytes);
         string sourceBitrateText = EstimateBitrateText(total, sourceSizeBytes);
-        string estimatedSize = choice?.Reencode == true
+        string estimatedSize =
+            canConfigureReencode && _bitrateModeRadioButton.Checked
             ? EstimateFileSizeText(
                 selectedDuration,
                 decimal.ToInt32(_bitrateInput.Value))
-            : "コピー出力のためサイズ推定なし";
+            : canConfigureReencode
+                ? "品質指定のためサイズ未確定"
+                : "コピー出力のためサイズ推定なし";
+        string rateControlText = canConfigureReencode
+            ? _bitrateModeRadioButton.Checked
+                ? $"Bitrate: {_bitrateInput.Value:0} kbps"
+                : $"品質: {_qualityComboBox.Text}"
+            : "無劣化コピー";
         _commandPreviewTextBox.Text =
             $"元動画: {sourceSizeText} / 平均 {sourceBitrateText}" +
             Environment.NewLine +
@@ -763,7 +815,7 @@ internal sealed class ClipEditorForm : Form
             $"選択時間: {FormatTime(selectedDuration)} / 推定サイズ: {estimatedSize} / " +
             //Environment.NewLine +
             $"Codec: {choice?.Text} / " +
-            $"Bitrate: {_bitrateInput.Value:0} kbps" +
+            rateControlText +
             Environment.NewLine +
             Environment.NewLine +
             BuildCommandPreview(exportRanges);
@@ -916,6 +968,56 @@ internal sealed class ClipEditorForm : Form
 
         double kbps = sizeBytes * 8.0 / duration.TotalSeconds / 1000.0;
         return $"{kbps:0} kbps";
+    }
+
+    private void SelectEncoder(string defaultCodec)
+    {
+        string normalized = NormalizeEncoderValue(defaultCodec);
+        int index = _encoderComboBox.Items
+            .Cast<EncoderChoice>()
+            .Select((item, itemIndex) => new { item, itemIndex })
+            .FirstOrDefault(entry => string.Equals(
+                NormalizeEncoderValue(entry.item.Value),
+                normalized,
+                StringComparison.OrdinalIgnoreCase))
+            ?.itemIndex ?? 1;
+        _encoderComboBox.SelectedIndex = index;
+    }
+
+    private static string NormalizeEncoderValue(string? value)
+    {
+        return value?.Trim() switch
+        {
+            null or "" => "AUTO",
+            "h264_nvenc" => "NVENC",
+            "h264_amf" => "AMF",
+            "h264_qsv" => "QSV",
+            "h264_mf" => "h264_mf",
+            "libopenh264" => "AUTO",
+            var text => text
+        };
+    }
+
+    private static string ToFinalVideoQualityDisplayName(string? value)
+    {
+        return value?.Trim() switch
+        {
+            "Size" => "サイズ優先",
+            "High" => "高品質",
+            "Highest" => "最高品質",
+            _ => "標準"
+        };
+    }
+
+    private static string FromFinalVideoQualityDisplayName(string? value)
+    {
+        return value?.Trim() switch
+        {
+            "サイズ優先" => "Size",
+            "高品質" => "High",
+            "最高品質" => "Highest",
+            _ => "Standard"
+        };
     }
 
     private static string EstimateSelectedSourceSizeText(

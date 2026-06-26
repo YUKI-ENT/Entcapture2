@@ -121,13 +121,13 @@ namespace GitHub.secile.Video
             get
             {
                 // allocate before first acccess.
-                if (Streams.ContainsKey(StreamType.Preview) == false) SetPreviewCallbackMain();
+                EnsurePreviewStream();
                 return Streams[StreamType.Preview].Buffered;
             }
             set
             {
                 // allocate before first acccess.
-                if (Streams.ContainsKey(StreamType.Preview) == false) SetPreviewCallbackMain();
+                EnsurePreviewStream();
                 Streams[StreamType.Preview].Buffered = value;
             }
         }
@@ -136,6 +136,23 @@ namespace GitHub.secile.Video
 
         private Action<IntPtr> SetPreviewControlMain;
         private Action<Size> SetPreviewSizeMain;
+
+        private void EnsurePreviewStream()
+        {
+            if (Streams.ContainsKey(StreamType.Preview))
+            {
+                return;
+            }
+
+            SetPreviewCallbackMain();
+            if (!Streams.ContainsKey(StreamType.Preview) &&
+                Streams.TryGetValue(
+                    StreamType.Capture,
+                    out SampleGrabberCallback captureStream))
+            {
+                Streams[StreamType.Preview] = captureStream;
+            }
+        }
 
         /// <summary>Set preview on control. Call before starts.</summary>
         /// <param name="handle">control handle.</param>
@@ -249,12 +266,10 @@ namespace GitHub.secile.Video
                         return () => sampler.GetBitmap();
                     }*/
 
-                    GetBitmap = GetBitmapFromSampleGrabberCallback(sample.Grabber, sample.Width, sample.Height, sample.Stride);
-                    Func<Bitmap> GetBitmapFromSampleGrabberCallback(DirectShow.ISampleGrabber grabber, int width, int height, int stride)
-                    {
-                        var sampler = new SampleGrabberCallback(grabber, width, height, stride, false);
-                        return () => sampler.GetBitmap();
-                    }
+                    SampleGrabberCallback captureStream =
+                        new(sample.Grabber, sample.Width, sample.Height, sample.Stride, false);
+                    Streams[StreamType.Capture] = captureStream;
+                    GetBitmap = () => captureStream.GetBitmap();
                 }
             }
 

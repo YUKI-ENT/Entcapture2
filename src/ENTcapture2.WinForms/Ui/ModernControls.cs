@@ -101,25 +101,27 @@ public sealed class ModernButton : Button
             return;
         }
 
-        using var textBrush = new SolidBrush(ForeColor);
-        using StringFormat format = new()
-        {
-            Alignment = StringAlignment.Center,
-            LineAlignment = StringAlignment.Center
-        };
-
-        float lineHeight = Font.GetHeight(graphics) + 1F;
-        float totalHeight = lineHeight * text.Length;
-        float y = Math.Max(0F, (Height - totalHeight) / 2F);
-        float centerX = Width / 2F;
+        Size measured = TextRenderer.MeasureText(
+            graphics,
+            text,
+            Font,
+            Size.Empty,
+            TextFormatFlags.NoPadding);
+        int lineHeight = Math.Max(1, measured.Height + 1);
+        int totalHeight = lineHeight * text.Length;
+        int y = Math.Max(0, (Height - totalHeight) / 2);
         foreach (char character in text)
         {
-            graphics.DrawString(
+            TextRenderer.DrawText(
+                graphics,
                 character.ToString(),
                 Font,
-                textBrush,
-                new RectangleF(0F, y, Width, lineHeight),
-                format);
+                new Rectangle(0, y, Width, lineHeight),
+                ForeColor,
+                TextFormatFlags.HorizontalCenter |
+                TextFormatFlags.VerticalCenter |
+                TextFormatFlags.NoPadding |
+                TextFormatFlags.NoClipping);
             y += lineHeight;
         }
     }

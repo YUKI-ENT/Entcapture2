@@ -242,7 +242,7 @@ public partial class MainForm : Form
         _toggleSidePanelButton.TextAlign = ContentAlignment.MiddleCenter;
         _toggleSidePanelButton.Dock = DockStyle.None;
         _toggleSidePanelButton.Anchor = AnchorStyles.None;
-        _toggleSidePanelButton.Size = new Size(30, 112);
+        _toggleSidePanelButton.Size = new Size(38, 112);
         _toggleSidePanelButton.Margin = new Padding(1);
 
         ConfigureCard(filterCard);
@@ -382,7 +382,7 @@ public partial class MainForm : Form
         workspaceLayout.ColumnStyles.Add(
             new ColumnStyle(SizeType.Percent, 100F));
         workspaceLayout.ColumnStyles.Add(
-            new ColumnStyle(SizeType.Absolute, 30F));
+            new ColumnStyle(SizeType.Absolute, 40F));
         workspaceLayout.ColumnStyles.Add(
             new ColumnStyle(SizeType.Absolute, 0F));
         workspaceLayout.Controls.Add(previewSurfacePanel, 0, 0);

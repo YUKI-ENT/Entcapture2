@@ -2286,7 +2286,8 @@ public partial class MainForm : Form
                 _whiteBalanceSelectionCheckBox.Checked = false;
             }
 
-            await SaveSelectedPresetAsync();
+            // 再生時にプリセット保存されると困るので
+            //await SaveSelectedPresetAsync(); 
         }
     }
 

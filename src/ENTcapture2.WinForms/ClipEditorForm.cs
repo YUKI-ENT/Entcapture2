@@ -34,6 +34,10 @@ internal sealed class ClipEditorForm : Form
     private readonly RadioButton _bitrateModeRadioButton = new();
     private readonly ComboBox _qualityComboBox = new();
     private readonly NumericUpDown _bitrateInput = new();
+    private readonly NumericUpDown _compressionPercentInput = new();
+    private readonly Label _sizeInfoLabel = new();
+    private bool _isUpdatingBitrate;
+    private bool _hasInitializedBitrate;
     private readonly RadioButton _joinedRadioButton = new();
     private readonly RadioButton _separateRadioButton = new();
     private readonly TextBox _outputDirectoryTextBox = new();
@@ -69,8 +73,8 @@ internal sealed class ClipEditorForm : Form
 
         Text = "動画編集・エンコード";
         StartPosition = FormStartPosition.CenterParent;
-        MinimumSize = new Size(820, 620);
-        Size = new Size(920, 700);
+        MinimumSize = new Size(820, 680);
+        Size = new Size(920, 760);
         BackColor = Theme.Window;
         ForeColor = Theme.Text;
         Font = Theme.BodyFont();
@@ -202,12 +206,12 @@ internal sealed class ClipEditorForm : Form
             AutoSize = true,
             Dock = DockStyle.Top,
             ColumnCount = 4,
-            RowCount = 4,
+            RowCount = 5,
             Margin = new Padding(0, 12, 0, 8)
         };
-        optionGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 110F));
-        optionGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 210F));
-        optionGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 120F));
+        optionGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 130F));
+        optionGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 200F));
+        optionGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 130F));
         optionGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
         root.Controls.Add(optionGrid, 0, 4);
 
@@ -242,18 +246,44 @@ internal sealed class ClipEditorForm : Form
         SelectEncoder(defaultCodec);
         optionGrid.Controls.Add(_encoderComboBox, 1, 1);
 
-        AddLabel(optionGrid, "制御", 2, 1);
-        _qualityModeRadioButton.Text = "品質";
-        _qualityModeRadioButton.Checked = true;
-        _qualityModeRadioButton.ForeColor = Theme.Text;
-        _bitrateModeRadioButton.Text = "ビットレート";
+        // 行 2: [ビットレート指定] [ビットレートInput + " kbps"] | [圧縮目標] [圧縮率Input + "%"]
+        _bitrateModeRadioButton.Text = "ビットレート指定";
+        _bitrateModeRadioButton.Checked = true;
         _bitrateModeRadioButton.ForeColor = Theme.Text;
-        var controlModePanel = new FlowLayoutPanel { AutoSize = true };
-        controlModePanel.Controls.Add(_qualityModeRadioButton);
-        controlModePanel.Controls.Add(_bitrateModeRadioButton);
-        optionGrid.Controls.Add(controlModePanel, 3, 1);
+        _bitrateModeRadioButton.AutoSize = true;
+        optionGrid.Controls.Add(_bitrateModeRadioButton, 0, 2);
 
-        AddLabel(optionGrid, "品質", 0, 2);
+        _bitrateInput.Minimum = 500;
+        _bitrateInput.Maximum = 100000;
+        _bitrateInput.Increment = 500;
+        _bitrateInput.Value = 5000;
+        _bitrateInput.BackColor = Theme.SurfaceRaised;
+        _bitrateInput.ForeColor = Theme.Text;
+
+        var bitratePanel = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.LeftToRight, Margin = new Padding(0) };
+        bitratePanel.Controls.Add(_bitrateInput);
+        bitratePanel.Controls.Add(new Label { Text = "kbps", AutoSize = true, ForeColor = Theme.Muted, Anchor = AnchorStyles.Left, Margin = new Padding(4, 6, 0, 0) });
+        optionGrid.Controls.Add(bitratePanel, 1, 2);
+
+        AddLabel(optionGrid, "圧縮目標", 2, 2);
+        _compressionPercentInput.Minimum = 10;
+        _compressionPercentInput.Maximum = 100;
+        _compressionPercentInput.Value = 70;
+        _compressionPercentInput.BackColor = Theme.SurfaceRaised;
+        _compressionPercentInput.ForeColor = Theme.Text;
+
+        var percentPanel = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.LeftToRight, Margin = new Padding(0) };
+        percentPanel.Controls.Add(_compressionPercentInput);
+        percentPanel.Controls.Add(new Label { Text = "%", AutoSize = true, ForeColor = Theme.Muted, Anchor = AnchorStyles.Left, Margin = new Padding(4, 6, 0, 0) });
+        optionGrid.Controls.Add(percentPanel, 3, 2);
+
+        // 行 3: [品質優先] [品質Combo] | [サイズ情報] [サイズ推移ラベル]
+        _qualityModeRadioButton.Text = "品質優先";
+        _qualityModeRadioButton.Checked = false;
+        _qualityModeRadioButton.ForeColor = Theme.Text;
+        _qualityModeRadioButton.AutoSize = true;
+        optionGrid.Controls.Add(_qualityModeRadioButton, 0, 3);
+
         _qualityComboBox.DropDownStyle = ComboBoxStyle.DropDownList;
         _qualityComboBox.BackColor = Theme.SurfaceRaised;
         _qualityComboBox.ForeColor = Theme.Text;
@@ -261,27 +291,25 @@ internal sealed class ClipEditorForm : Form
         _qualityComboBox.Items.AddRange(
             ["サイズ優先", "標準", "高品質", "最高品質"]);
         _qualityComboBox.Text = ToFinalVideoQualityDisplayName(defaultQuality);
-        optionGrid.Controls.Add(_qualityComboBox, 1, 2);
+        optionGrid.Controls.Add(_qualityComboBox, 1, 3);
 
-        AddLabel(optionGrid, "ビットレート", 2, 2);
-        _bitrateInput.Minimum = 500;
-        _bitrateInput.Maximum = 100000;
-        _bitrateInput.Increment = 500;
-        _bitrateInput.Value = 5000;
-        _bitrateInput.BackColor = Theme.SurfaceRaised;
-        _bitrateInput.ForeColor = Theme.Text;
-        optionGrid.Controls.Add(_bitrateInput, 3, 2);
+        AddLabel(optionGrid, "サイズ情報", 2, 3);
+        _sizeInfoLabel.AutoSize = true;
+        _sizeInfoLabel.ForeColor = Theme.Text;
+        _sizeInfoLabel.Anchor = AnchorStyles.Left;
+        optionGrid.Controls.Add(_sizeInfoLabel, 3, 3);
 
-        AddLabel(optionGrid, "出力先", 0, 3);
+        // 行 4: [出力先] [テキストボックス] [参照ボタン]
+        AddLabel(optionGrid, "出力先", 0, 4);
         _outputDirectoryTextBox.Text = outputDirectory;
         _outputDirectoryTextBox.BackColor = Theme.SurfaceRaised;
         _outputDirectoryTextBox.ForeColor = Theme.Text;
         _outputDirectoryTextBox.BorderStyle = BorderStyle.FixedSingle;
         _outputDirectoryTextBox.Dock = DockStyle.Fill;
-        optionGrid.Controls.Add(_outputDirectoryTextBox, 1, 3);
+        optionGrid.Controls.Add(_outputDirectoryTextBox, 1, 4);
         optionGrid.SetColumnSpan(_outputDirectoryTextBox, 2);
         ConfigureButton(_browseButton, "参照...", Theme.SurfaceRaised);
-        optionGrid.Controls.Add(_browseButton, 3, 3);
+        optionGrid.Controls.Add(_browseButton, 3, 4);
 
         _commandPreviewTextBox.Dock = DockStyle.Fill;
         _commandPreviewTextBox.Multiline = true;
@@ -348,7 +376,8 @@ internal sealed class ClipEditorForm : Form
         _qualityModeRadioButton.CheckedChanged += (_, _) => UpdatePresentation();
         _bitrateModeRadioButton.CheckedChanged += (_, _) => UpdatePresentation();
         _qualityComboBox.SelectedIndexChanged += (_, _) => UpdatePresentation();
-        _bitrateInput.ValueChanged += (_, _) => UpdatePresentation();
+        _bitrateInput.ValueChanged += BitrateInput_ValueChanged;
+        _compressionPercentInput.ValueChanged += CompressionPercentInput_ValueChanged;
         _joinedRadioButton.CheckedChanged += (_, _) => UpdatePresentation();
         _separateRadioButton.CheckedChanged += (_, _) => UpdatePresentation();
 
@@ -786,9 +815,33 @@ internal sealed class ClipEditorForm : Form
             canConfigureReencode && _qualityModeRadioButton.Checked;
         _bitrateInput.Enabled =
             canConfigureReencode && _bitrateModeRadioButton.Checked;
+        _compressionPercentInput.Enabled =
+            canConfigureReencode && _bitrateModeRadioButton.Checked;
+
         TimeSpan selectedDuration = TimeSpan.FromTicks(
             exportRanges.Sum(range => (range.End - range.Start).Ticks));
         long sourceSizeBytes = GetSourceSizeBytes();
+
+        if (total > TimeSpan.Zero && !_hasInitializedBitrate)
+        {
+            _hasInitializedBitrate = true;
+            _isUpdatingBitrate = true;
+            try
+            {
+                _compressionPercentInput.Value = 70;
+                double sourceBitrateKbps = sourceSizeBytes * 8.0 / total.TotalSeconds / 1000.0;
+                if (sourceBitrateKbps > 0)
+                {
+                    double targetBitrate = sourceBitrateKbps * 0.7;
+                    _bitrateInput.Value = Math.Clamp((decimal)targetBitrate, _bitrateInput.Minimum, _bitrateInput.Maximum);
+                }
+            }
+            finally
+            {
+                _isUpdatingBitrate = false;
+            }
+        }
+
         string sourceSizeText = FormatFileSize(sourceSizeBytes);
         string sourceBitrateText = EstimateBitrateText(total, sourceSizeBytes);
         string estimatedSize =
@@ -799,6 +852,20 @@ internal sealed class ClipEditorForm : Form
             : canConfigureReencode
                 ? "品質指定のためサイズ未確定"
                 : "コピー出力のためサイズ推定なし";
+
+        if (!canConfigureReencode)
+        {
+            _sizeInfoLabel.Text = "コピー出力（サイズ変化なし）";
+        }
+        else if (_qualityModeRadioButton.Checked)
+        {
+            _sizeInfoLabel.Text = $"{EstimateSelectedSourceSizeText(total, selectedDuration, sourceSizeBytes)}  →  未確定（品質指定）";
+        }
+        else
+        {
+            _sizeInfoLabel.Text = $"{EstimateSelectedSourceSizeText(total, selectedDuration, sourceSizeBytes)}  →  {estimatedSize}";
+        }
+
         string rateControlText = canConfigureReencode
             ? _bitrateModeRadioButton.Checked
                 ? $"Bitrate: {_bitrateInput.Value:0} kbps"
@@ -825,6 +892,57 @@ internal sealed class ClipEditorForm : Form
             _endTime ??
             (_startTime is not null ? GetCurrentEditorTime() : null);
         _rangeBar.Invalidate();
+    }
+
+    private void CompressionPercentInput_ValueChanged(object? sender, EventArgs e)
+    {
+        if (_isUpdatingBitrate) return;
+
+        _isUpdatingBitrate = true;
+        try
+        {
+            TimeSpan total = _lastPosition?.TotalTime ?? TimeSpan.Zero;
+            long sourceSizeBytes = GetSourceSizeBytes();
+            if (total > TimeSpan.Zero && sourceSizeBytes > 0)
+            {
+                double sourceBitrateKbps = sourceSizeBytes * 8.0 / total.TotalSeconds / 1000.0;
+                double targetBitrate = sourceBitrateKbps * ((double)_compressionPercentInput.Value / 100.0);
+                
+                decimal newValue = Math.Clamp((decimal)targetBitrate, _bitrateInput.Minimum, _bitrateInput.Maximum);
+                _bitrateInput.Value = newValue;
+            }
+        }
+        finally
+        {
+            _isUpdatingBitrate = false;
+        }
+        UpdatePresentation();
+    }
+
+    private void BitrateInput_ValueChanged(object? sender, EventArgs e)
+    {
+        if (_isUpdatingBitrate) return;
+
+        _isUpdatingBitrate = true;
+        try
+        {
+            TimeSpan total = _lastPosition?.TotalTime ?? TimeSpan.Zero;
+            long sourceSizeBytes = GetSourceSizeBytes();
+            if (total > TimeSpan.Zero && sourceSizeBytes > 0)
+            {
+                double sourceBitrateKbps = sourceSizeBytes * 8.0 / total.TotalSeconds / 1000.0;
+                double currentBitrate = (double)_bitrateInput.Value;
+                double percent = (currentBitrate / sourceBitrateKbps) * 100.0;
+
+                decimal newValue = Math.Clamp((decimal)percent, _compressionPercentInput.Minimum, _compressionPercentInput.Maximum);
+                _compressionPercentInput.Value = newValue;
+            }
+        }
+        finally
+        {
+            _isUpdatingBitrate = false;
+        }
+        UpdatePresentation();
     }
 
     private TimeSpan GetCurrentEditorTime()

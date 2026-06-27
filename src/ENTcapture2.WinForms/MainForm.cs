@@ -134,7 +134,7 @@ public partial class MainForm : Form
         Theme.Apply(this);
         RebuildRuntimeLayout();
         string applicationVersion = GetApplicationVersionText();
-        Text = $"ENTcapture2 v{applicationVersion}";
+        Text = $"ENTcapture v{applicationVersion}";
         BackColor = Theme.Window;
         ForeColor = Theme.Text;
         Font = Theme.BodyFont();
@@ -1028,8 +1028,10 @@ public partial class MainForm : Form
 
         try
         {
+            ENTcapture2.Core.Services.DebugLogger.Debug("RefreshDevicesAsync: Starting device discovery");
             IReadOnlyList<CameraDeviceInfo> devices =
                 await DirectShowDeviceCatalog.DiscoverAsync();
+            ENTcapture2.Core.Services.DebugLogger.Info($"RefreshDevicesAsync: Found {devices.Count} device(s)");
 
             _deviceComboBox.BeginUpdate();
             _deviceComboBox.Items.Clear();
@@ -1058,7 +1060,14 @@ public partial class MainForm : Form
             {
                 _statusLabel.Text = "●  カメラが見つかりません";
                 _statusLabel.ForeColor = Theme.Danger;
+                ENTcapture2.Core.Services.DebugLogger.Warning("RefreshDevicesAsync: No devices found");
             }
+        }
+        catch (Exception exception)
+        {
+            ENTcapture2.Core.Services.DebugLogger.Error("RefreshDevicesAsync: Device discovery failed", exception);
+            _statusLabel.Text = "●  カメラ検索エラー: " + exception.Message;
+            _statusLabel.ForeColor = Theme.Danger;
         }
         finally
         {
@@ -1212,6 +1221,27 @@ public partial class MainForm : Form
                         _settings.RecordingSegmentMinutes,
                         _settings.H264EncoderPreference)
                     : null;
+            System.Diagnostics.Debug.WriteLine($"[DEBUG] StartButton_Click deviceIndex={device.Index} moniker={device.MonikerString} presetFlipH={_flipHorizontalCheckBox.Checked} presetFlipV={_flipVerticalCheckBox.Checked} recordingOptions={(recordingOptions is not null)}");
+
+            // Overwrite current UI/internal filter state with the selected preset before starting preview/recording.
+            if (_selectedPreset is not null)
+            {
+                ApplyFilterStateToControls(new ImageFilterState(
+                    _selectedPreset.WhiteBalanceRed,
+                    _selectedPreset.WhiteBalanceGreen,
+                    _selectedPreset.WhiteBalanceBlue,
+                    _selectedPreset.Gamma,
+                    _selectedPreset.FlipHorizontal,
+                    _selectedPreset.FlipVertical));
+                _cameraService.UpdateProcessingOptions(
+                    _selectedPreset.WhiteBalanceRed,
+                    _selectedPreset.WhiteBalanceGreen,
+                    _selectedPreset.WhiteBalanceBlue,
+                    _selectedPreset.Gamma,
+                    _selectedPreset.FlipHorizontal,
+                    _selectedPreset.FlipVertical);
+            }
+
             await _cameraService.StartAsync(
                 device.Index,
                 resolution.Width,
@@ -1248,7 +1278,20 @@ public partial class MainForm : Form
         }
         catch (Exception exception)
         {
+            ENTcapture2.Core.Services.DebugLogger.Error("StartButton_Click: Camera initialization failed", exception);
             ShowError("カメラを開始できませんでした。", exception);
+            // Ensure safe cleanup on error
+            try
+            {
+                if (_cameraService.IsRunning)
+                {
+                    _ = _cameraService.StopAsync().ConfigureAwait(false);
+                }
+            }
+            catch (Exception cleanupEx)
+            {
+                ENTcapture2.Core.Services.DebugLogger.Error("StartButton_Click: Error during cleanup", cleanupEx);
+            }
         }
         finally
         {
@@ -2013,10 +2056,13 @@ public partial class MainForm : Form
 
         try
         {
+            System.Diagnostics.Debug.WriteLine($"[DEBUG] ApplyPlaybackMetadataAsync: searching DB for file: {firstFile}");
             CapturedFileMetadata? metadata =
                 await _metadataStore.FindFileAsync(firstFile);
+            System.Diagnostics.Debug.WriteLine($"[DEBUG] ApplyPlaybackMetadataAsync: metadata found = {metadata is not null}");
             if (metadata is not null)
             {
+                System.Diagnostics.Debug.WriteLine($"[DEBUG] ApplyPlaybackMetadata: PresetId={metadata.PresetId} PresetName={metadata.PresetName} Preset={metadata.Preset is not null}");
                 ApplyPlaybackMetadata(metadata);
                 return;
             }
@@ -2025,6 +2071,7 @@ public partial class MainForm : Form
                 PatientMetadataStore.ParseCaptureFileName(firstFile);
             if (parsed is null)
             {
+                System.Diagnostics.Debug.WriteLine($"[DEBUG] ApplyPlaybackMetadataAsync: ParseCaptureFileName returned null");
                 return;
             }
 
@@ -2044,6 +2091,7 @@ public partial class MainForm : Form
             _statusLabel.Text =
                 "● 再生メタデータ復元に失敗: " + exception.Message;
             _statusLabel.ForeColor = Theme.Danger;
+            System.Diagnostics.Debug.WriteLine($"[DEBUG] ApplyPlaybackMetadataAsync exception: {exception}");
         }
     }
 
@@ -2053,9 +2101,36 @@ public partial class MainForm : Form
             metadata.PresetId is { } presetId
                 ? _settings.Presets.FirstOrDefault(item => item.Id == presetId)
                 : null;
-        _playbackCapturePreset = metadata.Preset ?? preset;
+        CapturePreset? originalPreset = metadata.Preset ?? preset;
         _playbackCapturedAt = metadata.CapturedAt;
-        if (_playbackCapturePreset is null)
+
+        // For playback, preserve ROI and metadata but clear filters to avoid double-filtering.
+        if (originalPreset is not null)
+        {
+            _playbackCapturePreset = new CapturePreset
+            {
+                Id = originalPreset.Id,
+                Name = originalPreset.Name,
+                DeviceId = originalPreset.DeviceId,
+                DeviceName = originalPreset.DeviceName,
+                DeviceIndex = originalPreset.DeviceIndex,
+                Resolution = originalPreset.Resolution,
+                LegacyResolutionIndex = originalPreset.LegacyResolutionIndex,
+                IsVideo = originalPreset.IsVideo,
+                ExaminationType = originalPreset.ExaminationType,
+                Roi = originalPreset.Roi,  // ROI is preserved for snapshot clipping
+                OverlayText = originalPreset.OverlayText,
+                FontName = originalPreset.FontName,
+                FramesPerSecond = originalPreset.FramesPerSecond,
+                WhiteBalanceRed = 255,     // Filters cleared to avoid double-filtering during playback
+                WhiteBalanceGreen = 255,
+                WhiteBalanceBlue = 255,
+                Gamma = 1.0,
+                FlipHorizontal = false,
+                FlipVertical = false
+            };
+        }
+        else
         {
             _playbackCapturePreset =
                 CreatePlaybackFallbackPreset(metadata.ExaminationName);
@@ -2084,6 +2159,35 @@ public partial class MainForm : Form
         if (!string.IsNullOrWhiteSpace(metadata.ExaminationName))
         {
             _examinationTypeComboBox.Text = metadata.ExaminationName;
+        }
+
+        // Update preset button UI to reflect the loaded preset.
+        if (preset is not null)
+        {
+            _selectedPreset = preset;
+            _isUpdatingPresetControls = true;
+            try
+            {
+                foreach (RadioButton button in _quickPresetPanel.Controls.OfType<RadioButton>())
+                {
+                    button.Checked =
+                        button.Tag is CapturePreset item &&
+                        item.Id == preset.Id;
+                }
+
+                bool selectedMorePreset =
+                    _settings.Presets
+                        .Skip(QuickPresetCount)
+                        .Any(item => item.Id == preset.Id);
+                _morePresetsDropDownButton.Text = selectedMorePreset
+                    ? $"{preset.Name} ▾"
+                    : "その他 ▾";
+                SetMorePresetsDropDownSelected(selectedMorePreset);
+            }
+            finally
+            {
+                _isUpdatingPresetControls = false;
+            }
         }
     }
 
@@ -3065,7 +3169,7 @@ public partial class MainForm : Form
 
         ConfigureModernButton(
             _openSnapshotFolderButton,
-            "保存フォルダ",
+            "📁保存フォルダ",
             Theme.SurfaceRaised);
         _openSnapshotFolderButton.Width = 112;
         _openSnapshotFolderButton.Height = 54;
@@ -3951,6 +4055,26 @@ public partial class MainForm : Form
                 preset.FlipHorizontal;
             _flipVerticalCheckBox.Checked =
                 preset.FlipVertical;
+
+            // Ensure capture filter state is updated when applying a preset so
+            // that starting preview/recording uses the expected filters even
+            // if the preset was applied while playback was active.
+            ImageFilterState appliedState = new ImageFilterState(
+                preset.WhiteBalanceRed,
+                preset.WhiteBalanceGreen,
+                preset.WhiteBalanceBlue,
+                preset.Gamma,
+                preset.FlipHorizontal,
+                preset.FlipVertical);
+            _captureFilterState = appliedState;
+            _cameraService.UpdateProcessingOptions(
+                appliedState.Red,
+                appliedState.Green,
+                appliedState.Blue,
+                appliedState.Gamma,
+                appliedState.FlipHorizontal,
+                appliedState.FlipVertical);
+            System.Diagnostics.Debug.WriteLine($"[DEBUG] ApplyPreset id={preset.Id} deviceId='{preset.DeviceId}' flipH={preset.FlipHorizontal} flipV={preset.FlipVertical}");
         }
         finally
         {

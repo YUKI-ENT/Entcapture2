@@ -61,64 +61,83 @@ public sealed class CameraCaptureService : IAsyncDisposable
         int maximumPreviewFramesPerSecond = 0,
         CancellationToken cancellationToken = default)
     {
-        await StopAsync();
+        ENTcapture2.Core.Services.DebugLogger.Debug(
+            $"CameraCaptureService.StartAsync: deviceIndex={deviceIndex}, " +
+            $"resolution={width}x{height}@{framesPerSecond}fps, " +
+            $"pixelFormat={pixelFormat}, recording={recordingOptions is not null}");
 
-
-        _receivedFrames = 0;
-        _displayedFrames = 0;
-        _droppedFrames = 0;
-        LastRecordingPath = null;
-        _lastRecordingPaths.Clear();
-        LastRecordingError = null;
-        LastRecordingWarning = null;
-        LastRecordingEncoder = null;
-        _recordingOptions = recordingOptions;
-        _maximumPreviewFramesPerSecond =
-            Math.Clamp(maximumPreviewFramesPerSecond, 0, 240);
-        _frameChannel = Channel.CreateBounded<Mat>(
-            new BoundedChannelOptions(1)
-            {
-                FullMode = BoundedChannelFullMode.Wait,
-                SingleReader = true,
-                SingleWriter = true
-            });
-        _bitmapChannel = Channel.CreateBounded<Bitmap>(
-            new BoundedChannelOptions(2)
-            {
-                FullMode = BoundedChannelFullMode.Wait,
-                SingleReader = true,
-                SingleWriter = false
-            });
-        if (recordingOptions is not null)
+        try
         {
-            _recordingChannel = Channel.CreateBounded<Mat>(
-                new BoundedChannelOptions(RecordingQueueCapacity)
+            await StopAsync();
+
+            _receivedFrames = 0;
+            _displayedFrames = 0;
+            _droppedFrames = 0;
+            LastRecordingPath = null;
+            _lastRecordingPaths.Clear();
+            LastRecordingError = null;
+            LastRecordingWarning = null;
+            LastRecordingEncoder = null;
+            _recordingOptions = recordingOptions;
+            _maximumPreviewFramesPerSecond =
+                Math.Clamp(maximumPreviewFramesPerSecond, 0, 240);
+            _frameChannel = Channel.CreateBounded<Mat>(
+                new BoundedChannelOptions(1)
                 {
                     FullMode = BoundedChannelFullMode.Wait,
                     SingleReader = true,
                     SingleWriter = true
                 });
+            _bitmapChannel = Channel.CreateBounded<Bitmap>(
+                new BoundedChannelOptions(2)
+                {
+                    FullMode = BoundedChannelFullMode.Wait,
+                    SingleReader = true,
+                    SingleWriter = false
+                });
+            if (recordingOptions is not null)
+            {
+                _recordingChannel = Channel.CreateBounded<Mat>(
+                    new BoundedChannelOptions(RecordingQueueCapacity)
+                    {
+                        FullMode = BoundedChannelFullMode.Wait,
+                        SingleReader = true,
+                        SingleWriter = true
+                    });
+            }
+
+            _cancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            CancellationToken token = _cancellation.Token;
+            UsbCamera.VideoFormat format =
+                SelectUsbCameraFormat(
+                    deviceIndex,
+                    width,
+                    height,
+                    framesPerSecond,
+                    pixelFormat);
+            _usbCamera = new UsbCamera(deviceIndex, format);
+            ENTcapture2.Core.Services.DebugLogger.Info($"CameraCaptureService: Device initialized, starting capture");
+            _usbCamera.PreviewCaptured = UsbCamera_PreviewCaptured;
+            _usbCamera.Start();
+
+            _captureTask = Task.Run(() => StatisticsLoopAsync(token), token);
+            _bitmapIngestTask = Task.Run(() => BitmapIngestLoopAsync(token), token);
+            _processingTask = Task.Run(() => ProcessingLoopAsync(token), token);
+            _recordingTask = _recordingChannel is null
+                ? null
+                : Task.Run(() => RecordingLoopAsync(), CancellationToken.None);
+
+            ENTcapture2.Core.Services.DebugLogger.Info("CameraCaptureService.StartAsync: Capture started successfully");
         }
-
-        _cancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        CancellationToken token = _cancellation.Token;
-        UsbCamera.VideoFormat format =
-            SelectUsbCameraFormat(
-                deviceIndex,
-                width,
-                height,
-                framesPerSecond,
-                pixelFormat);
-        _usbCamera = new UsbCamera(deviceIndex, format);
-        _usbCamera.PreviewCaptured = UsbCamera_PreviewCaptured;
-        _usbCamera.Start();
-
-        _captureTask = Task.Run(() => StatisticsLoopAsync(token), token);
-        _bitmapIngestTask = Task.Run(() => BitmapIngestLoopAsync(token), token);
-        _processingTask = Task.Run(() => ProcessingLoopAsync(token), token);
-        _recordingTask = _recordingChannel is null
-            ? null
-            : Task.Run(() => RecordingLoopAsync(), CancellationToken.None);
+        catch (Exception exception)
+        {
+            ENTcapture2.Core.Services.DebugLogger.Error("CameraCaptureService.StartAsync: Failed to start capture", exception);
+            _cancellation = null;
+            _usbCamera?.Stop();
+            _usbCamera?.Release();
+            _usbCamera = null;
+            throw;
+        }
     }
 
     private static UsbCamera.VideoFormat SelectUsbCameraFormat(
@@ -222,6 +241,8 @@ public sealed class CameraCaptureService : IAsyncDisposable
 
     public async Task StopAsync()
     {
+        ENTcapture2.Core.Services.DebugLogger.Debug("CameraCaptureService.StopAsync: Stopping capture");
+
         CancellationTokenSource? cancellation = _cancellation;
         if (cancellation is null)
         {
@@ -232,8 +253,13 @@ public sealed class CameraCaptureService : IAsyncDisposable
         cancellation.Cancel();
         try
         {
+            ENTcapture2.Core.Services.DebugLogger.Debug("CameraCaptureService.StopAsync: Stopping USB camera");
             _usbCamera?.Stop();
             _usbCamera?.Release();
+        }
+        catch (Exception exception)
+        {
+            ENTcapture2.Core.Services.DebugLogger.Error("CameraCaptureService.StopAsync: Error stopping USB camera", exception);
         }
         finally
         {
@@ -248,6 +274,7 @@ public sealed class CameraCaptureService : IAsyncDisposable
                 Task.Delay(TimeSpan.FromMilliseconds(1500)));
             if (!ReferenceEquals(completedTask, captureTask))
             {
+                ENTcapture2.Core.Services.DebugLogger.Warning("CameraCaptureService.StopAsync: Capture task timeout, forcing release");
                 _capture?.Release();
             }
 
@@ -255,6 +282,10 @@ public sealed class CameraCaptureService : IAsyncDisposable
         }
         catch (OperationCanceledException)
         {
+        }
+        catch (Exception exception)
+        {
+            ENTcapture2.Core.Services.DebugLogger.Error("CameraCaptureService.StopAsync: Error stopping capture task", exception);
         }
         finally
         {
@@ -273,6 +304,10 @@ public sealed class CameraCaptureService : IAsyncDisposable
         catch (OperationCanceledException)
         {
         }
+        catch (Exception exception)
+        {
+            ENTcapture2.Core.Services.DebugLogger.Error("CameraCaptureService.StopAsync: Error stopping processing tasks", exception);
+        }
         finally
         {
             cancellation.Dispose();
@@ -287,6 +322,7 @@ public sealed class CameraCaptureService : IAsyncDisposable
             _capture?.Release();
             _capture?.Dispose();
             _capture = null;
+            ENTcapture2.Core.Services.DebugLogger.Info("CameraCaptureService.StopAsync: Capture stopped");
         }
     }
 
@@ -298,6 +334,7 @@ public sealed class CameraCaptureService : IAsyncDisposable
         bool flipHorizontal,
         bool flipVertical)
     {
+        System.Diagnostics.Debug.WriteLine($"[DEBUG] UpdateProcessingOptions R={red} G={green} B={blue} Gamma={gamma} FlipH={flipHorizontal} FlipV={flipVertical}");
         lock (_optionsLock)
         {
             _options = new ProcessingOptions(
@@ -369,12 +406,20 @@ public sealed class CameraCaptureService : IAsyncDisposable
             {
                 bitmap.Dispose();
                 Interlocked.Increment(ref _droppedFrames);
+                long droppedCount = Interlocked.Read(ref _droppedFrames);
+                if (droppedCount % 30 == 0)
+                {
+                    ENTcapture2.Core.Services.DebugLogger.Warning(
+                        $"CameraCaptureService: Frame drop detected. Received={Interlocked.Read(ref _receivedFrames)}, " +
+                        $"Dropped={droppedCount}");
+                }
             }
         }
         catch (Exception exception)
         {
             bitmap.Dispose();
             LastRecordingError ??= exception;
+            ENTcapture2.Core.Services.DebugLogger.Error("CameraCaptureService.UsbCamera_PreviewCaptured: Error processing frame", exception);
         }
     }
 
@@ -446,6 +491,7 @@ public sealed class CameraCaptureService : IAsyncDisposable
     {
         long previousReceived = 0;
         long previousDisplayed = 0;
+        long previousDropped = 0;
         var statisticsClock = Stopwatch.StartNew();
 
         while (!cancellationToken.IsCancellationRequested)
@@ -453,15 +499,28 @@ public sealed class CameraCaptureService : IAsyncDisposable
             await Task.Delay(1000, cancellationToken);
             long receivedCount = Interlocked.Read(ref _receivedFrames);
             long displayedCount = Interlocked.Read(ref _displayedFrames);
+            long droppedCount = Interlocked.Read(ref _droppedFrames);
             double elapsedSeconds = statisticsClock.Elapsed.TotalSeconds;
+
+            // Log significant frame drop events
+            if (droppedCount > previousDropped)
+            {
+                long newDrops = droppedCount - previousDropped;
+                ENTcapture2.Core.Services.DebugLogger.Warning(
+                    $"CameraCaptureService: Frame drop. " +
+                    $"Received={receivedCount}, Displayed={displayedCount}, " +
+                    $"Total Dropped={droppedCount}, New Drops={newDrops}");
+            }
+
             StatisticsUpdated?.Invoke(
                 new CaptureStatistics(
                     (receivedCount - previousReceived) / elapsedSeconds,
                     (displayedCount - previousDisplayed) / elapsedSeconds,
-                    Interlocked.Read(ref _droppedFrames)));
+                    droppedCount));
 
             previousReceived = receivedCount;
             previousDisplayed = displayedCount;
+            previousDropped = droppedCount;
             statisticsClock.Restart();
         }
     }
@@ -557,42 +616,57 @@ public sealed class CameraCaptureService : IAsyncDisposable
     {
         Debug.Assert(_frameChannel is not null);
         var previewClock = Stopwatch.StartNew();
+        long processedCount = 0;
 
-        await foreach (Mat source in _frameChannel.Reader.ReadAllAsync(cancellationToken))
+        try
         {
-            using (source)
-            using (Mat processed = ApplyProcessing(source))
+            await foreach (Mat source in _frameChannel.Reader.ReadAllAsync(cancellationToken))
             {
-                if (_maximumPreviewFramesPerSecond > 0)
+                using (source)
+                using (Mat processed = ApplyProcessing(source))
                 {
-                    double minimumMilliseconds =
-                        1000.0 / _maximumPreviewFramesPerSecond;
-                    double remaining =
-                        minimumMilliseconds -
-                        previewClock.Elapsed.TotalMilliseconds;
-                    if (remaining > 1)
+                    if (_maximumPreviewFramesPerSecond > 0)
                     {
-                        await Task.Delay(
-                            TimeSpan.FromMilliseconds(remaining),
-                            cancellationToken);
+                        double minimumMilliseconds =
+                            1000.0 / _maximumPreviewFramesPerSecond;
+                        double remaining =
+                            minimumMilliseconds -
+                            previewClock.Elapsed.TotalMilliseconds;
+                        if (remaining > 1)
+                        {
+                            await Task.Delay(
+                                TimeSpan.FromMilliseconds(remaining),
+                                cancellationToken);
+                        }
+
+                        previewClock.Restart();
                     }
 
-                    previewClock.Restart();
+                    Bitmap bitmap = BitmapConverter.ToBitmap(processed);
+                    Bitmap eventBitmap = (Bitmap)bitmap.Clone();
+
+                    lock (_imageLock)
+                    {
+                        Bitmap? previous = _latestImage;
+                        _latestImage = bitmap;
+                        previous?.Dispose();
+                    }
+
+                    Interlocked.Increment(ref _displayedFrames);
+                    processedCount++;
+                    FrameReady?.Invoke(eventBitmap);
                 }
-
-                Bitmap bitmap = BitmapConverter.ToBitmap(processed);
-                Bitmap eventBitmap = (Bitmap)bitmap.Clone();
-
-                lock (_imageLock)
-                {
-                    Bitmap? previous = _latestImage;
-                    _latestImage = bitmap;
-                    previous?.Dispose();
-                }
-
-                Interlocked.Increment(ref _displayedFrames);
-                FrameReady?.Invoke(eventBitmap);
             }
+        }
+        catch (OperationCanceledException)
+        {
+            // Expected when cancelling
+        }
+        catch (Exception exception)
+        {
+            ENTcapture2.Core.Services.DebugLogger.Error(
+                $"CameraCaptureService.ProcessingLoopAsync: Error processing frames. Processed={processedCount}", exception);
+            LastRecordingError ??= exception;
         }
     }
 

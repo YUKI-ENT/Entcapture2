@@ -105,8 +105,21 @@ namespace GitHub.secile.Video
         /// <remarks>called by worker thread.</remarks>
         public Action<Bitmap> StillImageCaptured
         {
-            get { return Streams[StreamType.Still].Buffered; }
-            set { Streams[StreamType.Still].Buffered = value; }
+            get 
+            { 
+                if (Streams.TryGetValue(StreamType.Still, out var stream))
+                {
+                    return stream.Buffered;
+                }
+                return null;
+            }
+            set 
+            { 
+                if (Streams.TryGetValue(StreamType.Still, out var stream))
+                {
+                    stream.Buffered = value;
+                }
+            }
         }
 
         /// <summary>
@@ -122,13 +135,20 @@ namespace GitHub.secile.Video
             {
                 // allocate before first acccess.
                 EnsurePreviewStream();
-                return Streams[StreamType.Preview].Buffered;
+                if (Streams.TryGetValue(StreamType.Preview, out var stream))
+                {
+                    return stream.Buffered;
+                }
+                return null;
             }
             set
             {
                 // allocate before first acccess.
                 EnsurePreviewStream();
-                Streams[StreamType.Preview].Buffered = value;
+                if (Streams.TryGetValue(StreamType.Preview, out var stream))
+                {
+                    stream.Buffered = value;
+                }
             }
         }
 

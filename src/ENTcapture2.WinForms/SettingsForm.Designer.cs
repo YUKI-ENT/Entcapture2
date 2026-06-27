@@ -820,7 +820,7 @@ public partial class SettingsForm
         _temporaryCodecComboBox.Items.AddRange(new object[] { "MJPG", "H264", "RAW" });
         _temporaryCodecComboBox.Location = new Point(133, 62);
         _temporaryCodecComboBox.Name = "_temporaryCodecComboBox";
-        _temporaryCodecComboBox.Size = new Size(150, 23);
+        _temporaryCodecComboBox.Size = new Size(180, 23);
         _temporaryCodecComboBox.TabIndex = 12;
         // 
         // h264EncoderLabel

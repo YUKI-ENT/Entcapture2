@@ -30,5 +30,7 @@ internal static class Program
 
         ISettingsStore settingsStore = new JsonSettingsStore();
         Application.Run(new MainForm(settingsStore));
+
+        DebugLogger.Shutdown();
     }
 }

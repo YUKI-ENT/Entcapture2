@@ -22,7 +22,7 @@ public partial class MainForm : Form
     private const int SwpNoSize = 0x0001;
     private const int SwpNoMove = 0x0002;
     private const int DwmwaExtendedFrameBounds = 9;
-
+        
     private readonly ISettingsStore _settingsStore;
     private readonly CameraCaptureService _cameraService = new();
     private readonly VideoPlaybackService _playbackService = new();
@@ -131,6 +131,8 @@ public partial class MainForm : Form
 
     private void ApplyRuntimePresentation()
     {
+
+
         Theme.Apply(this);
         RebuildRuntimeLayout();
         string applicationVersion = GetApplicationVersionText();
@@ -184,7 +186,7 @@ public partial class MainForm : Form
 
         ConfigureLabel(
             _previewMessage,
-            "カメラを選択して「プレビュー開始」を押してください",
+            $"カメラを選択して「{PlaybackCaptions.StartButton}」を押してください",
             Theme.Muted,
             12F,
             false);
@@ -219,7 +221,7 @@ public partial class MainForm : Form
         _resolutionComboBox.Margin = new Padding(4, 2, 8, 0);
         cameraLabel.Margin = new Padding(0, 5, 0, 0);
         resolutionLabel.Margin = new Padding(0, 5, 0, 0);
-        ConfigureModernButton(_startButton, "プレビュー開始", Theme.Accent);
+        ConfigureModernButton(_startButton, PlaybackCaptions.StartButton, Theme.Accent);
         ConfigureModernButton(
             _refreshDevicesButton,
             "↻ 再検索",
@@ -275,7 +277,7 @@ public partial class MainForm : Form
         captureTitleLabel.Visible = false;
         ConfigureModernButton(
             _snapshotButton,
-            "静止画",
+            "👁️静止画",
             Theme.Accent);
         ConfigureModernButton(
             _savePresetButton,
@@ -287,7 +289,7 @@ public partial class MainForm : Form
             Theme.SurfaceRaised);
         ConfigureModernButton(
             _openClipEditorButton,
-            "動画編集",
+            "✂動画編集",
             Theme.SurfaceRaised);
         ConfigureModernButton(
             _closePlaybackButton,
@@ -756,7 +758,7 @@ public partial class MainForm : Form
         _previewBox.SizeMode = PictureBoxSizeMode.Zoom;
 
         _previewMessage.AutoSize = true;
-        _previewMessage.Text = "カメラを選択して「プレビュー開始」を押してください";
+        _previewMessage.Text = $"カメラを選択して「{PlaybackCaptions.StartButton}」を押してください";
         _previewMessage.Font = Theme.BodyFont(12);
         _previewMessage.ForeColor = Theme.Muted;
         _previewMessage.BackColor = Color.Transparent;
@@ -835,7 +837,7 @@ public partial class MainForm : Form
             WrapContents = false,
             Margin = new Padding(0, 8, 0, 0)
         };
-        ConfigureButton(_startButton, "プレビュー開始", Theme.Accent);
+        ConfigureButton(_startButton, PlaybackCaptions.StartButton, Theme.Accent);
         _startButton.Width = 170;
         ConfigureButton(_refreshDevicesButton, "再検索", Theme.SurfaceRaised);
         _refreshDevicesButton.Width = 82;
@@ -1260,8 +1262,8 @@ public partial class MainForm : Form
             }
 
             _startButton.Text = recordingOptions is null
-                ? "プレビュー停止"
-                : "取り込み終了";
+                ? PlaybackCaptions.StopButton
+                : PlaybackCaptions.EndButton;
             _startButton.FillColor = Theme.Danger;
             _startButton.BackColor = Theme.Danger;
             _startButton.HoverColor = Color.FromArgb(225, 29, 72);
@@ -1537,7 +1539,7 @@ public partial class MainForm : Form
 
     private void UpdateCaptureModePresentation()
     {
-        _startButton.Text = "プレビュー開始";
+        _startButton.Text = PlaybackCaptions.StartButton;
     }
 
     private IReadOnlyList<ModernRadioButton> QuickPresetButtons =>
@@ -3178,7 +3180,7 @@ public partial class MainForm : Form
 
         ConfigureModernButton(
             _rsBaseImportButton,
-            "RSBase取込",
+            "🔄RSBase取込",
             Theme.SurfaceRaised);
         _rsBaseImportButton.Width = 104;
         _rsBaseImportButton.Height = 54;

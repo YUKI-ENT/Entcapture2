@@ -1,6 +1,10 @@
 using System;
 using System.IO;
 using System.Text;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Channels;
+using System.Threading.Tasks;
 
 namespace ENTcapture2.Core.Services;
 
@@ -10,10 +14,28 @@ namespace ENTcapture2.Core.Services;
 /// </summary>
 public sealed class DebugLogger
 {
+    private const int MaxLogRetentionDays = 7;
     private static readonly object _lockObject = new object();
     private static string? _logsDirectory;
     private static string? _currentLogFilePath;
     private static DateTime? _currentLogDate;
+
+    private static readonly Channel<(string Level, string Message, DateTime Timestamp)> _logChannel;
+    private static readonly Task _processTask;
+
+    static DebugLogger()
+    {
+        _logChannel = Channel.CreateUnbounded<(string Level, string Message, DateTime Timestamp)>(
+            new UnboundedChannelOptions
+            {
+                SingleReader = true,
+                AllowSynchronousContinuations = false
+            });
+
+        _processTask = Task.Run(ProcessQueueAsync);
+
+        AppDomain.CurrentDomain.ProcessExit += (s, e) => Shutdown();
+    }
 
     public static void Info(string message)
     {
@@ -40,11 +62,42 @@ public sealed class DebugLogger
 
     private static void Log(string level, string message)
     {
+        DateTime now = DateTime.Now;
+        try
+        {
+            _logChannel.Writer.TryWrite((level, message, now));
+        }
+        catch
+        {
+            // Silently fail if logging fails to avoid crashing the application
+        }
+    }
+
+    private static async Task ProcessQueueAsync()
+    {
+        var reader = _logChannel.Reader;
+        try
+        {
+            while (await reader.WaitToReadAsync())
+            {
+                while (reader.TryRead(out var logEntry))
+                {
+                    WriteToFile(logEntry.Level, logEntry.Message, logEntry.Timestamp);
+                }
+            }
+        }
+        catch
+        {
+            // Silently fail if processing fails
+        }
+    }
+
+    private static void WriteToFile(string level, string message, DateTime now)
+    {
         lock (_lockObject)
         {
             try
             {
-                DateTime now = DateTime.Now;
                 string logsDir = GetLogsDirectory();
                 string logFile = GetLogFilePath(logsDir, now);
 
@@ -56,6 +109,19 @@ public sealed class DebugLogger
             {
                 // Silently fail if logging fails to avoid crashing the application
             }
+        }
+    }
+
+    public static void Shutdown()
+    {
+        try
+        {
+            _logChannel.Writer.TryComplete();
+            _processTask.Wait(3000);
+        }
+        catch
+        {
+            // Silently fail if shutdown fails
         }
     }
 
@@ -73,6 +139,7 @@ public sealed class DebugLogger
         try
         {
             Directory.CreateDirectory(_logsDirectory);
+            CleanupOldLogs();
         }
         catch (Exception)
         {
@@ -89,6 +156,31 @@ public sealed class DebugLogger
         }
 
         return _logsDirectory;
+    }
+
+    private static void CleanupOldLogs()
+    {
+        try
+        {
+            if (_logsDirectory == null) return;
+            var directoryInfo = new DirectoryInfo(_logsDirectory);
+            if (!directoryInfo.Exists) return;
+
+            var files = directoryInfo.GetFiles("entcapture2_*.log");
+            DateTime cutoffDate = DateTime.Now.AddDays(-MaxLogRetentionDays);
+
+            foreach (var file in files)
+            {
+                if (file.CreationTime < cutoffDate || file.LastWriteTime < cutoffDate)
+                {
+                    file.Delete();
+                }
+            }
+        }
+        catch
+        {
+            // Silently fail if cleanup fails
+        }
     }
 
     private static string GetLogFilePath(string logsDirectory, DateTime now)
@@ -113,3 +205,4 @@ public sealed class DebugLogger
         return GetLogFilePath(logsDir, DateTime.Now);
     }
 }
+

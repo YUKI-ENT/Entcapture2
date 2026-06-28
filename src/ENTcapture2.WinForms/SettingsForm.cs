@@ -1527,7 +1527,8 @@ public partial class SettingsForm : Form
             WhiteBalanceBlue = source.WhiteBalanceBlue,
             Gamma = source.Gamma,
             FlipHorizontal = source.FlipHorizontal,
-            FlipVertical = source.FlipVertical
+            FlipVertical = source.FlipVertical,
+            SimpleNbi = source.SimpleNbi
         };
     }
 }

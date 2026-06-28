@@ -50,6 +50,8 @@ public partial class MainForm : Form
     private readonly ModernButton _rsBaseImportButton = new();
     private readonly ToolTip _thumbnailToolTip = new();
     private readonly ContextMenuStrip _morePresetsMenu = new();
+    private readonly FlowLayoutPanel _simpleNbiPanel = new();
+    private readonly CheckBox _simpleNbiCheckBox = new();
 
     private ApplicationSettings _settings = ApplicationSettings.CreateDefault();
     private CapturePreset? _selectedPreset;
@@ -274,6 +276,26 @@ public partial class MainForm : Form
         whiteBalanceHintLabel.ForeColor = Theme.Muted;
         _flipHorizontalCheckBox.ForeColor = Theme.Text;
         _flipVerticalCheckBox.ForeColor = Theme.Text;
+        _simpleNbiPanel.Dock = DockStyle.Fill;
+        _simpleNbiPanel.WrapContents = false;
+        _simpleNbiPanel.Margin = Padding.Empty;
+        _simpleNbiPanel.Padding = Padding.Empty;
+        if (!filterCard.Controls.Contains(_simpleNbiPanel))
+        {
+            filterCard.Controls.Remove(_resetFiltersButton);
+            filterCard.Controls.Add(_simpleNbiPanel);
+            filterCard.Controls.Add(_resetFiltersButton);
+        }
+
+        _simpleNbiCheckBox.AutoSize = true;
+        _simpleNbiCheckBox.Margin = new Padding(3, 6, 3, 3);
+        _simpleNbiCheckBox.Text = "簡易NBI";
+        _simpleNbiCheckBox.ForeColor = Theme.Text;
+        if (!_simpleNbiPanel.Controls.Contains(_simpleNbiCheckBox))
+        {
+            _simpleNbiPanel.Controls.Add(_simpleNbiCheckBox);
+        }
+
         ConfigureSliderRow(redRow, _redTrack, _redValue, "R", 0, 510, 255);
         ConfigureSliderRow(greenRow, _greenTrack, _greenValue, "G", 0, 510, 255);
         ConfigureSliderRow(blueRow, _blueTrack, _blueValue, "B", 0, 510, 255);
@@ -984,6 +1006,8 @@ public partial class MainForm : Form
             (_, _) => ProcessingControlChanged();
         _flipVerticalCheckBox.CheckedChanged +=
             (_, _) => ProcessingControlChanged();
+        _simpleNbiCheckBox.CheckedChanged +=
+            (_, _) => ProcessingControlChanged();
         _whiteBalanceSelectionCheckBox.CheckedChanged +=
             WhiteBalanceSelectionCheckBox_CheckedChanged;
         _previewBox.MouseDown += PreviewBox_MouseDown;
@@ -1270,14 +1294,16 @@ public partial class MainForm : Form
                     _selectedPreset.WhiteBalanceBlue,
                     _selectedPreset.Gamma,
                     _selectedPreset.FlipHorizontal,
-                    _selectedPreset.FlipVertical));
+                    _selectedPreset.FlipVertical,
+                    _selectedPreset.SimpleNbi));
                 _cameraService.UpdateProcessingOptions(
                     _selectedPreset.WhiteBalanceRed,
                     _selectedPreset.WhiteBalanceGreen,
                     _selectedPreset.WhiteBalanceBlue,
                     _selectedPreset.Gamma,
                     _selectedPreset.FlipHorizontal,
-                    _selectedPreset.FlipVertical);
+                    _selectedPreset.FlipVertical,
+                    _selectedPreset.SimpleNbi);
             }
 
             await _cameraService.StartAsync(
@@ -2275,7 +2301,8 @@ public partial class MainForm : Form
                 WhiteBalanceBlue = 255,
                 Gamma = 1.0,
                 FlipHorizontal = false,
-                FlipVertical = false
+                FlipVertical = false,
+                SimpleNbi = false
             };
         }
         else
@@ -2352,7 +2379,8 @@ public partial class MainForm : Form
             WhiteBalanceRed = 255,
             WhiteBalanceGreen = 255,
             WhiteBalanceBlue = 255,
-            Gamma = 1.0
+            Gamma = 1.0,
+            SimpleNbi = false
         };
     }
 
@@ -3958,9 +3986,19 @@ public partial class MainForm : Form
                 for (int x = 0; x < filtered.Width; x++)
                 {
                     int offset = rowOffset + x * 3;
-                    pixels[offset] = blueLut[pixels[offset]];
-                    pixels[offset + 1] = greenLut[pixels[offset + 1]];
-                    pixels[offset + 2] = redLut[pixels[offset + 2]];
+                    byte blue = blueLut[pixels[offset]];
+                    byte green = greenLut[pixels[offset + 1]];
+                    byte red = redLut[pixels[offset + 2]];
+                    if (state.SimpleNbi)
+                    {
+                        blue = ScaleChannel(blue, 1.35);
+                        green = ScaleChannel(green, 1.2);
+                        red = ScaleChannel(red, 0.35);
+                    }
+
+                    pixels[offset] = blue;
+                    pixels[offset + 1] = green;
+                    pixels[offset + 2] = red;
                 }
             }
 
@@ -3972,6 +4010,14 @@ public partial class MainForm : Form
         }
 
         return filtered;
+    }
+
+    private static byte ScaleChannel(byte value, double multiplier)
+    {
+        return (byte)Math.Clamp(
+            (int)Math.Round(value * multiplier),
+            0,
+            255);
     }
 
     private static byte[] BuildCorrectionLookup(int balance, double gamma)
@@ -4015,7 +4061,8 @@ public partial class MainForm : Form
             state.Blue,
             state.Gamma,
             state.FlipHorizontal,
-            state.FlipVertical);
+            state.FlipVertical,
+            state.SimpleNbi);
     }
 
     private void RedrawCurrentPlaybackFrame()
@@ -4043,7 +4090,8 @@ public partial class MainForm : Form
             _blueTrack.Value,
             _gammaTrack.Value / 10.0,
             _flipHorizontalCheckBox.Checked,
-            _flipVerticalCheckBox.Checked);
+            _flipVerticalCheckBox.Checked,
+            _simpleNbiCheckBox.Checked);
     }
 
     private void ApplyFilterStateToControls(ImageFilterState state)
@@ -4060,6 +4108,7 @@ public partial class MainForm : Form
                 (int)Math.Round(state.Gamma * 10));
             _flipHorizontalCheckBox.Checked = state.FlipHorizontal;
             _flipVerticalCheckBox.Checked = state.FlipVertical;
+            _simpleNbiCheckBox.Checked = state.SimpleNbi;
             UpdateFilterValueLabels(state);
         }
         finally
@@ -4105,7 +4154,8 @@ public partial class MainForm : Form
             _captureFilterState.Blue,
             _captureFilterState.Gamma,
             _captureFilterState.FlipHorizontal,
-            _captureFilterState.FlipVertical);
+            _captureFilterState.FlipVertical,
+            _captureFilterState.SimpleNbi);
     }
 
     private void ResetFilters()
@@ -4116,6 +4166,7 @@ public partial class MainForm : Form
         _gammaTrack.Value = 10;
         _flipHorizontalCheckBox.Checked = false;
         _flipVerticalCheckBox.Checked = false;
+        _simpleNbiCheckBox.Checked = false;
     }
 
     private async void SavePresetButton_Click(object? sender, EventArgs e)
@@ -4155,6 +4206,8 @@ public partial class MainForm : Form
             _flipHorizontalCheckBox.Checked;
         _selectedPreset.FlipVertical =
             _flipVerticalCheckBox.Checked;
+        _selectedPreset.SimpleNbi =
+            _simpleNbiCheckBox.Checked;
 
         _savePresetButton.Enabled = false;
         try
@@ -4329,6 +4382,8 @@ public partial class MainForm : Form
                 preset.FlipHorizontal;
             _flipVerticalCheckBox.Checked =
                 preset.FlipVertical;
+            _simpleNbiCheckBox.Checked =
+                preset.SimpleNbi;
 
             // Ensure capture filter state is updated when applying a preset so
             // that starting preview/recording uses the expected filters even
@@ -4339,7 +4394,8 @@ public partial class MainForm : Form
                 preset.WhiteBalanceBlue,
                 preset.Gamma,
                 preset.FlipHorizontal,
-                preset.FlipVertical);
+                preset.FlipVertical,
+                preset.SimpleNbi);
             _captureFilterState = appliedState;
             _cameraService.UpdateProcessingOptions(
                 appliedState.Red,
@@ -4347,8 +4403,9 @@ public partial class MainForm : Form
                 appliedState.Blue,
                 appliedState.Gamma,
                 appliedState.FlipHorizontal,
-                appliedState.FlipVertical);
-            System.Diagnostics.Debug.WriteLine($"[DEBUG] ApplyPreset id={preset.Id} deviceId='{preset.DeviceId}' flipH={preset.FlipHorizontal} flipV={preset.FlipVertical}");
+                appliedState.FlipVertical,
+                appliedState.SimpleNbi);
+            System.Diagnostics.Debug.WriteLine($"[DEBUG] ApplyPreset id={preset.Id} deviceId='{preset.DeviceId}' flipH={preset.FlipHorizontal} flipV={preset.FlipVertical} simpleNbi={preset.SimpleNbi}");
         }
         finally
         {
@@ -4724,10 +4781,11 @@ public partial class MainForm : Form
         int Blue,
         double Gamma,
         bool FlipHorizontal,
-        bool FlipVertical)
+        bool FlipVertical,
+        bool SimpleNbi)
     {
         public static ImageFilterState Default { get; } =
-            new(255, 255, 255, 1.0, false, false);
+            new(255, 255, 255, 1.0, false, false, false);
 
         public bool IsDefault =>
             Red == 255 &&
@@ -4735,6 +4793,7 @@ public partial class MainForm : Form
             Blue == 255 &&
             Math.Abs(Gamma - 1.0) < 0.001 &&
             !FlipHorizontal &&
-            !FlipVertical;
+            !FlipVertical &&
+            !SimpleNbi;
     }
 }

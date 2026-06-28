@@ -42,6 +42,8 @@ public sealed class CapturePreset
 
     public bool FlipVertical { get; set; }
 
+    public bool SimpleNbi { get; set; }
+
     public CapturePreset Clone()
     {
         return new CapturePreset
@@ -65,7 +67,8 @@ public sealed class CapturePreset
             WhiteBalanceBlue = WhiteBalanceBlue,
             Gamma = Gamma,
             FlipHorizontal = FlipHorizontal,
-            FlipVertical = FlipVertical
+            FlipVertical = FlipVertical,
+            SimpleNbi = SimpleNbi
         };
     }
 

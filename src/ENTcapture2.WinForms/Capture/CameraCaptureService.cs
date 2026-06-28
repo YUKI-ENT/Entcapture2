@@ -391,9 +391,10 @@ public sealed class CameraCaptureService : IAsyncDisposable
         int blue,
         double gamma,
         bool flipHorizontal,
-        bool flipVertical)
+        bool flipVertical,
+        bool simpleNbi)
     {
-        System.Diagnostics.Debug.WriteLine($"[DEBUG] UpdateProcessingOptions R={red} G={green} B={blue} Gamma={gamma} FlipH={flipHorizontal} FlipV={flipVertical}");
+        System.Diagnostics.Debug.WriteLine($"[DEBUG] UpdateProcessingOptions R={red} G={green} B={blue} Gamma={gamma} FlipH={flipHorizontal} FlipV={flipVertical} SimpleNbi={simpleNbi}");
         lock (_optionsLock)
         {
             _options = new ProcessingOptions(
@@ -402,7 +403,8 @@ public sealed class CameraCaptureService : IAsyncDisposable
                 Math.Clamp(blue, 0, 510),
                 Math.Clamp(gamma, 0.1, 3.0),
                 flipHorizontal,
-                flipVertical);
+                flipVertical,
+                simpleNbi);
         }
     }
 
@@ -1149,7 +1151,49 @@ public sealed class CameraCaptureService : IAsyncDisposable
             Cv2.LUT(result, lookupTable, result);
         }
 
+        if (options.SimpleNbi)
+        {
+            ApplySimpleNbi(result);
+        }
+
         return result;
+    }
+
+    private static void ApplySimpleNbi(Mat frame)
+    {
+        Mat[] channels = Cv2.Split(frame);
+        try
+        {
+            channels[0].ConvertTo(channels[0], MatType.CV_8U, 1.35);
+            channels[1].ConvertTo(channels[1], MatType.CV_8U, 1.2);
+            channels[2].ConvertTo(channels[2], MatType.CV_8U, 0.35);
+            Cv2.Merge(channels, frame);
+        }
+        finally
+        {
+            foreach (Mat channel in channels)
+            {
+                channel.Dispose();
+            }
+        }
+
+        using var lab = new Mat();
+        Cv2.CvtColor(frame, lab, ColorConversionCodes.BGR2Lab);
+        Mat[] labChannels = Cv2.Split(lab);
+        try
+        {
+            using var clahe = Cv2.CreateCLAHE(clipLimit: 2.0, tileGridSize: new OpenCvSharp.Size(8, 8));
+            clahe.Apply(labChannels[0], labChannels[0]);
+            Cv2.Merge(labChannels, lab);
+            Cv2.CvtColor(lab, frame, ColorConversionCodes.Lab2BGR);
+        }
+        finally
+        {
+            foreach (Mat channel in labChannels)
+            {
+                channel.Dispose();
+            }
+        }
     }
 
     private void ReportCaptureFault(Exception exception)
@@ -1299,10 +1343,11 @@ public sealed class CameraCaptureService : IAsyncDisposable
         int Blue,
         double Gamma,
         bool FlipHorizontal,
-        bool FlipVertical)
+        bool FlipVertical,
+        bool SimpleNbi)
     {
         public static ProcessingOptions Default { get; } =
-            new(255, 255, 255, 1.0, false, false);
+            new(255, 255, 255, 1.0, false, false, false);
     }
 
     private sealed record SnapshotCandidate(Mat Frame, DateTime CapturedAtUtc);

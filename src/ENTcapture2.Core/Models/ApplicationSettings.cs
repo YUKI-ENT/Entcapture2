@@ -16,6 +16,8 @@ public sealed class ApplicationSettings
 
     public int SnapshotDebounceMilliseconds { get; set; } = 500;
 
+    public int SnapshotBestFrameWindowMilliseconds { get; set; } = 300;
+
     public CaptureOperationMode CaptureMode { get; set; } =
         CaptureOperationMode.ContinuousTemporaryRecording;
 
@@ -31,11 +33,11 @@ public sealed class ApplicationSettings
 
     public int RecordingSegmentMinutes { get; set; } = 10;
 
-    public int TemporaryFileRetentionDays { get; set; }
+    public int TemporaryFileRetentionDays { get; set; } = 7;
 
     public int MaximumPreviewFramesPerSecond { get; set; }
 
-    public int ReencodeThresholdMegabytes { get; set; }
+    public int ReencodeThresholdMegabytes { get; set; } = 100;
 
     public string FinalVideoCodec { get; set; } = "libx264";
 
@@ -66,6 +68,8 @@ public sealed class ApplicationSettings
         "http://127.0.0.1/~rsn/2000.cgi?rs_base=auto_file==";
 
     public bool AutoFileToRsBase { get; set; }
+
+    public bool OpenRsBasePatientPageAfterFiling { get; set; }
 
     public int MainWindowLeft { get; set; } = int.MinValue;
 

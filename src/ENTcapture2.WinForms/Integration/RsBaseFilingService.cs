@@ -16,17 +16,16 @@ internal sealed class RsBaseFilingService
         ApplicationSettings settings,
         bool fileVideo,
         bool notifyRsBase,
+        string patientId,
         IProgress<string>? progress = null,
         CancellationToken cancellationToken = default)
     {
         var destinationFiles = new List<string>();
         if (sourceFiles.Count == 0)
         {
-            if (notifyRsBase)
-            {
-                await CallReloadUrlAsync(settings, cancellationToken);
-            }
-
+            ENTcapture2.Core.Services.DebugLogger.Info(
+                "RsBaseFilingService.FileRecordingAsync: No source files. " +
+                "Skipping RSBase reload and patient page.");
             return destinationFiles;
         }
 
@@ -77,10 +76,17 @@ internal sealed class RsBaseFilingService
             }
         }
 
-        if (notifyRsBase)
+        if (notifyRsBase && (!fileVideo || destinationFiles.Count > 0))
         {
             progress?.Report("RSBaseへ取込通知中...");
             await CallReloadUrlAsync(settings, cancellationToken);
+            OpenPatientPageIfNeeded(settings, patientId);
+        }
+        else if (notifyRsBase)
+        {
+            ENTcapture2.Core.Services.DebugLogger.Info(
+                "RsBaseFilingService.FileRecordingAsync: No destination files. " +
+                "Skipping RSBase reload and patient page.");
         }
 
         return destinationFiles;
@@ -88,11 +94,13 @@ internal sealed class RsBaseFilingService
 
     public async Task NotifyRsBaseAsync(
         ApplicationSettings settings,
+        string patientId,
         CancellationToken cancellationToken = default)
     {
         if (!string.IsNullOrWhiteSpace(settings.RsBaseReloadUrl))
         {
             await CallReloadUrlAsync(settings, cancellationToken);
+            OpenPatientPageIfNeeded(settings, patientId);
         }
     }
 
@@ -269,6 +277,47 @@ internal sealed class RsBaseFilingService
             settings.RsBaseReloadUrl,
             cancellationToken);
         response.EnsureSuccessStatusCode();
+    }
+
+    private static void OpenPatientPageIfNeeded(
+        ApplicationSettings settings,
+        string patientId)
+    {
+        if (!settings.OpenRsBasePatientPageAfterFiling ||
+            string.IsNullOrWhiteSpace(patientId))
+        {
+            return;
+        }
+
+        string url = BuildPatientPageUrl(settings, patientId.Trim());
+        Process.Start(new ProcessStartInfo(url)
+        {
+            UseShellExecute = true
+        });
+    }
+
+    private static string BuildPatientPageUrl(
+        ApplicationSettings settings,
+        string patientId)
+    {
+        string escapedPatientId = Uri.EscapeDataString(patientId);
+        if (Uri.TryCreate(
+                settings.RsBaseReloadUrl,
+                UriKind.Absolute,
+                out Uri? reloadUri))
+        {
+            string path = reloadUri.AbsolutePath;
+            int lastSlash = path.LastIndexOf('/');
+            string directory = lastSlash >= 0 ? path[..(lastSlash + 1)] : "/";
+            var builder = new UriBuilder(reloadUri)
+            {
+                Path = directory + "N2017.cgi",
+                Query = $"id_change={escapedPatientId}=="
+            };
+            return builder.Uri.AbsoluteUri;
+        }
+
+        return $"http://127.0.0.1/~rsn/N2017.cgi?id_change={escapedPatientId}==";
     }
 
     private static string GetAvailableDestinationPath(

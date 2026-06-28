@@ -62,9 +62,8 @@ public static class LegacySettingsImporter
         settings.TemporaryRecordingCodec =
             NormalizeLegacyCodec(settings.TemporaryRecordingCodec);
 
-        settings.CaptureMode = GetBool(values, "norec")
-            ? CaptureOperationMode.PreviewOnly
-            : CaptureOperationMode.ContinuousTemporaryRecording;
+        bool previewOnly = GetBool(values, "norec");
+        settings.CaptureMode = CaptureOperationMode.ContinuousTemporaryRecording;
         settings.RecordingSegmentMinutes =
             Math.Max(1, GetInt(values, "timeout", 10));
         settings.TemporaryFileRetentionDays =
@@ -118,12 +117,17 @@ public static class LegacySettingsImporter
                 DeviceIndex = Math.Max(0, index - 1),
                 LegacyResolutionIndex = GetInt(values, $"reso{index}", -1),
                 IsVideo = GetBool(values, $"video{index}"),
+                PreviewOnly = previewOnly,
                 ExaminationType = Get(values, $"test{index}"),
                 Roi = Get(values, $"roi{index}"),
                 OverlayText = Get(values, $"string{index}"),
                 FontName = Get(values, $"font{index}"),
                 FramesPerSecond = GetInt(values, $"FPS{index}", 0)
             };
+            if (preset.IsVideo)
+            {
+                preset.PreviewOnly = false;
+            }
 
             ApplyFilter(preset, filters);
             ValidateLegacyDrawingValues(preset, index, result.Warnings);

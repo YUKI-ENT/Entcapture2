@@ -22,7 +22,21 @@ public partial class MainForm : Form
     private const int SwpNoSize = 0x0001;
     private const int SwpNoMove = 0x0002;
     private const int DwmwaExtendedFrameBounds = 9;
-        
+    private static readonly HashSet<string> OutputMediaExtensions = new(
+        StringComparer.OrdinalIgnoreCase)
+    {
+        ".jpg",
+        ".jpeg",
+        ".png",
+        ".bmp",
+        ".gif",
+        ".mp4",
+        ".avi",
+        ".mov",
+        ".mkv",
+        ".wmv"
+    };
+
     private readonly ISettingsStore _settingsStore;
     private readonly CameraCaptureService _cameraService = new();
     private readonly VideoPlaybackService _playbackService = new();
@@ -57,6 +71,8 @@ public partial class MainForm : Form
     private bool _isClosing;
     private int _frameRenderPending;
     private bool _isSeekingPlayback;
+    private bool _isCaptureTransitioning;
+    private int _isHandlingCaptureFault;
     private readonly Stopwatch _recordingClock = new();
     private bool _isRefreshingDevices;
     private DateTime _lastSnapshotAt = DateTime.MinValue;
@@ -932,6 +948,7 @@ public partial class MainForm : Form
         FormClosing += MainForm_FormClosing;
         _cameraService.FrameReady += CameraService_FrameReady;
         _cameraService.StatisticsUpdated += CameraService_StatisticsUpdated;
+        _cameraService.CaptureFaulted += CameraService_CaptureFaulted;
         _playbackService.FrameReady += PlaybackService_FrameReady;
         _hotkeyService.SnapshotPressed += HotkeyService_SnapshotPressed;
         _hotkeyService.CapturePressed += HotkeyService_CapturePressed;
@@ -1003,10 +1020,7 @@ public partial class MainForm : Form
             RefreshPresetControls();
             await RefreshDevicesAsync();
 
-            CapturePreset? selectedPreset =
-                _settings.Presets.FirstOrDefault(
-                    preset => preset.Id == _settings.SelectedPresetId)
-                ?? _settings.Presets.FirstOrDefault();
+            CapturePreset? selectedPreset = _settings.Presets.FirstOrDefault();
 
             if (selectedPreset is not null)
             {
@@ -1181,6 +1195,11 @@ public partial class MainForm : Form
 
     private async void StartButton_Click(object? sender, EventArgs e)
     {
+        if (_isCaptureTransitioning)
+        {
+            return;
+        }
+
         if (_cameraService.IsRunning)
         {
             await StopPreviewAsync();
@@ -1204,6 +1223,8 @@ public partial class MainForm : Form
 
         try
         {
+            _isCaptureTransitioning = true;
+            UpdateInteractionGuards();
             if (_playbackService.IsOpen)
             {
                 await ClosePlaybackAsync();
@@ -1223,7 +1244,22 @@ public partial class MainForm : Form
                         _settings.RecordingSegmentMinutes,
                         _settings.H264EncoderPreference)
                     : null;
-            System.Diagnostics.Debug.WriteLine($"[DEBUG] StartButton_Click deviceIndex={device.Index} moniker={device.MonikerString} presetFlipH={_flipHorizontalCheckBox.Checked} presetFlipV={_flipVerticalCheckBox.Checked} recordingOptions={(recordingOptions is not null)}");
+            ENTcapture2.Core.Services.DebugLogger.Info(
+                "StartButton_Click: Starting camera" +
+                Environment.NewLine +
+                $"  deviceIndex={device.Index}" +
+                Environment.NewLine +
+                $"  deviceName={device.Name}" +
+                Environment.NewLine +
+                $"  moniker={device.MonikerString}" +
+                Environment.NewLine +
+                $"  resolution={resolution.Width}x{resolution.Height}@{resolution.FramesPerSecond}" +
+                Environment.NewLine +
+                $"  pixelFormat={resolution.PixelFormat}" +
+                Environment.NewLine +
+                $"  recording={recordingOptions is not null}" +
+                Environment.NewLine +
+                $"  log={ENTcapture2.Core.Services.DebugLogger.GetCurrentLogFilePath()}");
 
             // Overwrite current UI/internal filter state with the selected preset before starting preview/recording.
             if (_selectedPreset is not null)
@@ -1281,30 +1317,109 @@ public partial class MainForm : Form
         catch (Exception exception)
         {
             ENTcapture2.Core.Services.DebugLogger.Error("StartButton_Click: Camera initialization failed", exception);
+            await StopCameraAfterFailureAsync("StartButton_Click");
+            ResetCaptureUiAfterStop();
             ShowError("カメラを開始できませんでした。", exception);
-            // Ensure safe cleanup on error
-            try
-            {
-                if (_cameraService.IsRunning)
-                {
-                    _ = _cameraService.StopAsync().ConfigureAwait(false);
-                }
-            }
-            catch (Exception cleanupEx)
-            {
-                ENTcapture2.Core.Services.DebugLogger.Error("StartButton_Click: Error during cleanup", cleanupEx);
-            }
         }
         finally
         {
+            _isCaptureTransitioning = false;
             _startButton.Enabled = true;
             UpdateInteractionGuards();
         }
     }
 
+    private async Task StopCameraAfterFailureAsync(string caller)
+    {
+        if (!_cameraService.IsRunning)
+        {
+            return;
+        }
+
+        ENTcapture2.Core.Services.DebugLogger.Warning(
+            $"{caller}: Stopping camera after failure");
+        try
+        {
+            await _cameraService.StopAsync();
+        }
+        catch (Exception cleanupException)
+        {
+            ENTcapture2.Core.Services.DebugLogger.Error(
+                $"{caller}: Error during camera cleanup",
+                cleanupException);
+        }
+    }
+
+    private void ResetCaptureUiAfterStop()
+    {
+        _recordingClock.Stop();
+        UpdateCaptureModePresentation();
+        _startButton.Text = PlaybackCaptions.StartButton;
+        _startButton.FillColor = Theme.Accent;
+        _startButton.BackColor = Theme.Accent;
+        _startButton.HoverColor = Theme.AccentHover;
+        _snapshotButton.Enabled = false;
+        _deviceComboBox.Enabled = true;
+        _resolutionComboBox.Enabled = true;
+        _previewMessage.Visible = true;
+        _fpsLabel.Text = "INPUT -- fps  /  PREVIEW -- fps";
+        UpdatePreviewTopMostState();
+    }
+
+    private async Task HandleCaptureFaultAsync(Exception exception)
+    {
+        if (_isClosing ||
+            Interlocked.Exchange(ref _isHandlingCaptureFault, 1) == 1)
+        {
+            return;
+        }
+
+        try
+        {
+            ENTcapture2.Core.Services.DebugLogger.Error(
+                "MainForm.HandleCaptureFaultAsync: Capture fault received",
+                exception);
+            _isCaptureTransitioning = true;
+            UpdateInteractionGuards();
+            await StopCameraAfterFailureAsync("HandleCaptureFaultAsync");
+            ResetCaptureUiAfterStop();
+            _statusLabel.Text = "●  カメラ接続が停止しました";
+            _statusLabel.ForeColor = Theme.Danger;
+        }
+        finally
+        {
+            _isCaptureTransitioning = false;
+            Interlocked.Exchange(ref _isHandlingCaptureFault, 0);
+            UpdateInteractionGuards();
+        }
+    }
+
+    private void CameraService_CaptureFaulted(Exception exception)
+    {
+        if (_isClosing)
+        {
+            return;
+        }
+
+        try
+        {
+            BeginInvoke(async () => await HandleCaptureFaultAsync(exception));
+        }
+        catch (InvalidOperationException)
+        {
+        }
+    }
+
     private async Task StopPreviewAsync()
     {
+        if (_isCaptureTransitioning)
+        {
+            return;
+        }
+
+        _isCaptureTransitioning = true;
         _startButton.Enabled = false;
+        UpdateInteractionGuards();
         try
         {
             bool shouldPlay =
@@ -1312,19 +1427,9 @@ public partial class MainForm : Form
                 GetEffectiveCaptureMode() ==
                 CaptureOperationMode.ContinuousTemporaryRecording;
             await _cameraService.StopAsync();
-            _recordingClock.Stop();
-            UpdateCaptureModePresentation();
-            _startButton.FillColor = Theme.Accent;
-            _startButton.BackColor = Theme.Accent;
-            _startButton.HoverColor = Theme.AccentHover;
-            _snapshotButton.Enabled = false;
-            _deviceComboBox.Enabled = true;
-            _resolutionComboBox.Enabled = true;
-            _previewMessage.Visible = true;
+            ResetCaptureUiAfterStop();
             _statusLabel.Text = "●  スタンバイ";
             _statusLabel.ForeColor = Theme.Muted;
-            _fpsLabel.Text = "INPUT -- fps  /  PREVIEW -- fps";
-            UpdatePreviewTopMostState();
             UpdateInteractionGuards();
 
             if (_cameraService.LastRecordingError is not null)
@@ -1360,6 +1465,7 @@ public partial class MainForm : Form
         }
         finally
         {
+            _isCaptureTransitioning = false;
             _startButton.Enabled = true;
             UpdateInteractionGuards();
         }
@@ -1387,6 +1493,16 @@ public partial class MainForm : Form
             return;
         }
 
+        if (notifyRsBase &&
+            !fileVideo &&
+            !OutputDirectoryHasMediaFiles())
+        {
+            ENTcapture2.Core.Services.DebugLogger.Info(
+                "RunRsBaseAutoFilingAsync: Output directory has no media files. " +
+                "Skipping RSBase reload and patient page.");
+            return;
+        }
+
         try
         {
             var progress = new Progress<string>(message =>
@@ -1400,6 +1516,7 @@ public partial class MainForm : Form
                     _settings,
                     fileVideo,
                     notifyRsBase,
+                    _patientIdTextBox.Text.Trim(),
                     progress);
             await RecordRecordingFilesAsync(filedPaths);
             _statusLabel.Text = "●  RSBase自動ファイリングを完了しました";
@@ -1427,7 +1544,9 @@ public partial class MainForm : Form
 
         try
         {
-            await _rsBaseFilingService.NotifyRsBaseAsync(_settings);
+            await _rsBaseFilingService.NotifyRsBaseAsync(
+                _settings,
+                _patientIdTextBox.Text.Trim());
         }
         catch (Exception exception)
         {
@@ -1556,11 +1675,14 @@ public partial class MainForm : Form
         bool isPreviewing = _cameraService.IsRunning;
         bool canChangeCaptureSource =
             !isPreviewing &&
-            !_isRefreshingDevices;
+            !_isRefreshingDevices &&
+            !_isCaptureTransitioning;
         bool canChangePreset =
-            !isPreviewing;
+            !isPreviewing &&
+            !_isCaptureTransitioning;
         bool canOpenDialogs =
-            !isPreviewing;
+            !isPreviewing &&
+            !_isCaptureTransitioning;
 
         foreach (ModernRadioButton button in QuickPresetButtons)
         {
@@ -1581,6 +1703,14 @@ public partial class MainForm : Form
         _openPlaybackButton.Enabled = canOpenDialogs;
         _previewOnlyCheckBox.Enabled = canChangeCaptureSource;
         _fileVideoCheckBox.Enabled = canChangeCaptureSource;
+        _startButton.Enabled =
+            !_isRefreshingDevices &&
+            !_isCaptureTransitioning &&
+            (_cameraService.IsRunning ||
+             _deviceComboBox.SelectedItem is CameraDeviceInfo);
+        _snapshotButton.Enabled =
+            !_isCaptureTransitioning &&
+            (_cameraService.IsRunning || _playbackService.IsOpen);
     }
 
     private void UpdateHeaderOptions()
@@ -1590,7 +1720,9 @@ public partial class MainForm : Form
         try
         {
             _previewOnlyCheckBox.Checked =
-                _settings.CaptureMode == CaptureOperationMode.PreviewOnly;
+                _selectedPreset?.PreviewOnly == true;
+            _fileVideoCheckBox.Checked =
+                _selectedPreset?.IsVideo == true;
             ApplyHeaderOptionRules(null);
         }
         finally
@@ -1893,6 +2025,7 @@ public partial class MainForm : Form
         try
         {
             ApplyHeaderOptionRules(sender);
+            ApplyHeaderOptionsToSelectedPreset();
         }
         finally
         {
@@ -1900,6 +2033,18 @@ public partial class MainForm : Form
         }
 
         UpdateCaptureModePresentation();
+    }
+
+    private void ApplyHeaderOptionsToSelectedPreset()
+    {
+        if (_selectedPreset is null)
+        {
+            return;
+        }
+
+        _selectedPreset.IsVideo = _fileVideoCheckBox.Checked;
+        _selectedPreset.PreviewOnly = _previewOnlyCheckBox.Checked &&
+            !_selectedPreset.IsVideo;
     }
 
     private void StartExternalIntegrations()
@@ -2119,6 +2264,7 @@ public partial class MainForm : Form
                 Resolution = originalPreset.Resolution,
                 LegacyResolutionIndex = originalPreset.LegacyResolutionIndex,
                 IsVideo = originalPreset.IsVideo,
+                PreviewOnly = originalPreset.PreviewOnly,
                 ExaminationType = originalPreset.ExaminationType,
                 Roi = originalPreset.Roi,  // ROI is preserved for snapshot clipping
                 OverlayText = originalPreset.OverlayText,
@@ -2287,7 +2433,7 @@ public partial class MainForm : Form
             }
 
             // 再生時にプリセット保存されると困るので
-            //await SaveSelectedPresetAsync(); 
+            //await SaveSelectedPresetAsync();
         }
     }
 
@@ -3107,7 +3253,8 @@ public partial class MainForm : Form
             return;
         }
 
-        using Bitmap? snapshot = GetCurrentSnapshot();
+        CapturePreset? activePreset = GetActiveSnapshotPreset();
+        using Bitmap? snapshot = GetCurrentSnapshot(activePreset);
         if (snapshot is null)
         {
             return;
@@ -3118,7 +3265,7 @@ public partial class MainForm : Form
             DateTime capturedAt = GetSnapshotCapturedAt(requestedAt);
             using Bitmap processed = SnapshotProcessor.Process(
                 snapshot,
-                GetActiveSnapshotPreset(),
+                activePreset,
                 _patientIdTextBox.Text.Trim(),
                 _patientNameTextBox.Text.Trim(),
                 capturedAt);
@@ -3142,8 +3289,11 @@ public partial class MainForm : Form
             AddSnapshotThumbnail(processed, path, capturedAt);
             PlaySnapshotSound();
             _lastSnapshotAt = capturedAt;
+            LogSnapshotSaved(path);
+            UpdateRsBaseImportButtonVisibility();
 
-            _statusLabel.Text = $"●  保存しました: {fileName}";
+            _statusLabel.Text =
+                $"●  保存しました: {fileName}{GetBestSnapshotStatusSuffix()}";
             _statusLabel.ForeColor = Theme.AccentBright;
         }
         catch (Exception exception)
@@ -3247,10 +3397,41 @@ public partial class MainForm : Form
         _openSnapshotFolderButton.Location = new Point(folderX, y);
     }
 
+    private bool OutputDirectoryHasMediaFiles()
+    {
+        string directory = _settings.SnapshotDirectory;
+        if (string.IsNullOrWhiteSpace(directory))
+        {
+            directory = ApplicationSettings.CreateDefault().SnapshotDirectory;
+        }
+
+        return OutputDirectoryHasMediaFiles(directory);
+    }
+
+    private static bool OutputDirectoryHasMediaFiles(string directory)
+    {
+        try
+        {
+            return !string.IsNullOrWhiteSpace(directory) &&
+                Directory.Exists(directory) &&
+                Directory.EnumerateFiles(directory)
+                    .Any(path => OutputMediaExtensions.Contains(
+                        Path.GetExtension(path)));
+        }
+        catch (Exception exception)
+        {
+            ENTcapture2.Core.Services.DebugLogger.Error(
+                $"OutputDirectoryHasMediaFiles: Failed to scan {directory}",
+                exception);
+            return false;
+        }
+    }
+
     private void UpdateRsBaseImportButtonVisibility()
     {
         _rsBaseImportButton.Visible =
-            !string.IsNullOrWhiteSpace(_settings.RsBaseReloadUrl);
+            !string.IsNullOrWhiteSpace(_settings.RsBaseReloadUrl) &&
+            OutputDirectoryHasMediaFiles();
         EnsureThumbnailFixedControls();
         PositionThumbnailActionButtons();
     }
@@ -3265,7 +3446,17 @@ public partial class MainForm : Form
 
         try
         {
-            Directory.CreateDirectory(directory);
+            if (!OutputDirectoryHasMediaFiles(directory))
+            {
+                _statusLabel.Text =
+                    "●  保存フォルダに画像または動画ファイルがありません";
+                _statusLabel.ForeColor = Theme.Muted;
+                ENTcapture2.Core.Services.DebugLogger.Info(
+                    "OpenSnapshotFolderButton_Click: Output directory has no media files. " +
+                    $"Skipping open. Directory={directory}");
+                return;
+            }
+
             Process.Start(
                 new ProcessStartInfo(directory)
                 {
@@ -3286,12 +3477,26 @@ public partial class MainForm : Form
             return;
         }
 
+        if (!OutputDirectoryHasMediaFiles())
+        {
+            _statusLabel.Text =
+                "● RSBase取込対象の画像または動画ファイルがありません";
+            _statusLabel.ForeColor = Theme.Muted;
+            ENTcapture2.Core.Services.DebugLogger.Info(
+                "RsBaseImportButton_Click: Output directory has no media files. " +
+                "Skipping RSBase reload and patient page.");
+            UpdateRsBaseImportButtonVisibility();
+            return;
+        }
+
         _rsBaseImportButton.Enabled = false;
         _statusLabel.Text = "● RSBase取込を通知中...";
         _statusLabel.ForeColor = Theme.AccentBright;
         try
         {
-            await _rsBaseFilingService.NotifyRsBaseAsync(_settings);
+            await _rsBaseFilingService.NotifyRsBaseAsync(
+                _settings,
+                _patientIdTextBox.Text.Trim());
             _statusLabel.Text = "● RSBase取込を通知しました";
             _statusLabel.ForeColor = Theme.AccentBright;
         }
@@ -3488,7 +3693,7 @@ public partial class MainForm : Form
         item.Dispose();
     }
 
-    private Bitmap? GetCurrentSnapshot()
+    private Bitmap? GetCurrentSnapshot(CapturePreset? activePreset = null)
     {
         if (_playbackService.IsOpen)
         {
@@ -3497,7 +3702,42 @@ public partial class MainForm : Form
                 : (Bitmap)_displayedImage.Clone();
         }
 
-        return _cameraService.GetSnapshot();
+        return _cameraService.GetBestSnapshot(
+            _settings.SnapshotBestFrameWindowMilliseconds,
+            activePreset?.Roi);
+    }
+
+    private string GetBestSnapshotStatusSuffix()
+    {
+        if (_playbackService.IsOpen ||
+            _settings.SnapshotBestFrameWindowMilliseconds <= 0 ||
+            _cameraService.LastBestSnapshotSelection is not { } selection)
+        {
+            return string.Empty;
+        }
+
+        if (selection.CandidateCount <= 1)
+        {
+            return " / ブレ防止: 候補1枚";
+        }
+
+        string selected = selection.UsedBestFrame
+            ? $"{selection.SelectedAgeMilliseconds}ms前"
+            : "現在";
+        double ratio = selection.LatestScore <= 0
+            ? 1.0
+            : selection.BestScore / selection.LatestScore;
+        return $" / ブレ防止: {selection.CandidateCount}枚中 {selected} x{ratio:0.0}";
+    }
+
+    private void LogSnapshotSaved(string path)
+    {
+        ENTcapture2.Core.Services.DebugLogger.Info(
+            "Snapshot saved" +
+            Environment.NewLine +
+            $"  path={path}" +
+            Environment.NewLine +
+            $"  log={ENTcapture2.Core.Services.DebugLogger.GetCurrentLogFilePath()}");
     }
 
     private DateTime GetSnapshotCapturedAt(DateTime fallback)
@@ -3522,7 +3762,7 @@ public partial class MainForm : Form
         if (_previewZoomForm is null || _previewZoomForm.IsDisposed)
         {
             _previewZoomForm = new PreviewZoomForm();
-            RestoreZoomWindowBounds(_previewZoomForm);
+            _previewZoomForm.Icon = Icon;
             _previewZoomForm.TopMost = ShouldUsePreviewTopMost();
             _previewZoomForm.PlaybackSeekRequested +=
                 PreviewZoomForm_PlaybackSeekRequested;
@@ -3546,7 +3786,6 @@ public partial class MainForm : Form
         using Bitmap clone = (Bitmap)_displayedImage.Clone();
         double initialZoom = CalculateInitialZoom(clone.Size);
         _previewZoomForm.SetImage(clone, initialZoom);
-        RestoreZoomWindowBounds(_previewZoomForm);
         if (_lastPlaybackPosition is not null)
         {
             _previewZoomForm.SetPlaybackPosition(
@@ -3881,6 +4120,9 @@ public partial class MainForm : Form
         _selectedPreset.Gamma = _gammaTrack.Value / 10.0;
         _selectedPreset.ExaminationType =
             _examinationTypeComboBox.Text.Trim();
+        _selectedPreset.IsVideo = _fileVideoCheckBox.Checked;
+        _selectedPreset.PreviewOnly = _previewOnlyCheckBox.Checked &&
+            !_selectedPreset.IsVideo;
         _selectedPreset.FlipHorizontal =
             _flipHorizontalCheckBox.Checked;
         _selectedPreset.FlipVertical =
@@ -4025,6 +4267,7 @@ public partial class MainForm : Form
             _examinationTypeComboBox.Text =
                 preset.ExaminationType;
             _fileVideoCheckBox.Checked = preset.IsVideo;
+            _previewOnlyCheckBox.Checked = preset.PreviewOnly;
             ApplyHeaderOptionRules(null);
 
             CameraDeviceInfo? device = _deviceComboBox.Items
@@ -4436,6 +4679,7 @@ public partial class MainForm : Form
 
     private void ShowError(string message, Exception exception)
     {
+        ENTcapture2.Core.Services.DebugLogger.Error(message, exception);
         _statusLabel.Text = "●  エラー";
         _statusLabel.ForeColor = Theme.Danger;
         MessageBox.Show(

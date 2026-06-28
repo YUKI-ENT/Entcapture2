@@ -27,10 +27,6 @@ internal static class SnapshotProcessor
                 capturedAt,
                 Point.Empty);
         }
-        else
-        {
-            DrawDefaultPatientOverlay(result, patientId, patientName);
-        }
 
         return result;
     }
@@ -209,43 +205,4 @@ internal static class SnapshotProcessor
             .Replace("$n", patientName, StringComparison.Ordinal);
     }
 
-    private static void DrawDefaultPatientOverlay(
-        Bitmap image,
-        string patientId,
-        string patientName)
-    {
-        string text = string.Join(
-            "  ",
-            new[] { patientId.Trim(), patientName.Trim() }
-                .Where(value => value.Length > 0));
-        if (text.Length == 0)
-        {
-            return;
-        }
-
-        using Graphics graphics = Graphics.FromImage(image);
-        graphics.SmoothingMode = SmoothingMode.AntiAlias;
-        using Font font = new(
-            "Yu Gothic UI",
-            Math.Max(14, image.Width / 55F),
-            FontStyle.Bold,
-            GraphicsUnit.Pixel);
-        SizeF textSize = graphics.MeasureString(text, font);
-        float padding = Math.Max(10, image.Width / 100F);
-        var background = new RectangleF(
-            padding,
-            image.Height - textSize.Height - padding * 2,
-            textSize.Width + padding * 2,
-            textSize.Height + padding);
-        using var backgroundBrush = new SolidBrush(
-            Color.FromArgb(155, 0, 0, 0));
-        using var textBrush = new SolidBrush(Color.White);
-        graphics.FillRectangle(backgroundBrush, background);
-        graphics.DrawString(
-            text,
-            font,
-            textBrush,
-            background.Left + padding,
-            background.Top + padding / 2);
-    }
 }

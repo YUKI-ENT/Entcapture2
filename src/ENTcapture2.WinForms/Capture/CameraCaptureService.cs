@@ -9,9 +9,11 @@ namespace ENTcapture2.WinForms.Capture;
 public sealed class CameraCaptureService : IAsyncDisposable
 {
     private const int RecordingQueueCapacity = 600;
+    private const int MaximumBestSnapshotWindowMilliseconds = 1000;
 
     private readonly object _imageLock = new();
     private readonly object _optionsLock = new();
+    private readonly Queue<SnapshotCandidate> _snapshotCandidates = new();
     private CancellationTokenSource? _cancellation;
     private Task? _captureTask;
     private Task? _bitmapIngestTask;
@@ -36,6 +38,8 @@ public sealed class CameraCaptureService : IAsyncDisposable
 
     public event Action<CaptureStatistics>? StatisticsUpdated;
 
+    public event Action<Exception>? CaptureFaulted;
+
     public bool IsRunning => _cancellation is not null;
 
     public string? LastRecordingPath { get; private set; }
@@ -48,6 +52,8 @@ public sealed class CameraCaptureService : IAsyncDisposable
     public string? LastRecordingWarning { get; private set; }
 
     public string? LastRecordingEncoder { get; private set; }
+
+    public BestSnapshotSelection? LastBestSnapshotSelection { get; private set; }
 
     private readonly List<string> _lastRecordingPaths = [];
 
@@ -132,11 +138,59 @@ public sealed class CameraCaptureService : IAsyncDisposable
         catch (Exception exception)
         {
             ENTcapture2.Core.Services.DebugLogger.Error("CameraCaptureService.StartAsync: Failed to start capture", exception);
-            _cancellation = null;
-            _usbCamera?.Stop();
-            _usbCamera?.Release();
-            _usbCamera = null;
+            try
+            {
+                await StopAsync();
+                CleanupPartialStartResources();
+            }
+            catch (Exception cleanupException)
+            {
+                ENTcapture2.Core.Services.DebugLogger.Error(
+                    "CameraCaptureService.StartAsync: Cleanup after failed start failed",
+                    cleanupException);
+            }
+
             throw;
+        }
+    }
+
+    private void CleanupPartialStartResources()
+    {
+        try
+        {
+            _usbCamera?.Stop();
+        }
+        catch (Exception exception)
+        {
+            ENTcapture2.Core.Services.DebugLogger.Error(
+                "CameraCaptureService.CleanupPartialStartResources: Error stopping USB camera",
+                exception);
+        }
+
+        try
+        {
+            _usbCamera?.Release();
+        }
+        catch (Exception exception)
+        {
+            ENTcapture2.Core.Services.DebugLogger.Error(
+                "CameraCaptureService.CleanupPartialStartResources: Error releasing USB camera",
+                exception);
+        }
+
+        _usbCamera = null;
+        _bitmapChannel?.Writer.TryComplete();
+        _frameChannel?.Writer.TryComplete();
+        _recordingChannel?.Writer.TryComplete();
+        _bitmapChannel = null;
+        _frameChannel = null;
+        _recordingChannel = null;
+        _recordingOptions = null;
+        _cancellation?.Dispose();
+        _cancellation = null;
+        lock (_imageLock)
+        {
+            ClearSnapshotCandidates();
         }
     }
 
@@ -322,6 +376,11 @@ public sealed class CameraCaptureService : IAsyncDisposable
             _capture?.Release();
             _capture?.Dispose();
             _capture = null;
+            lock (_imageLock)
+            {
+                ClearSnapshotCandidates();
+            }
+
             ENTcapture2.Core.Services.DebugLogger.Info("CameraCaptureService.StopAsync: Capture stopped");
         }
     }
@@ -352,6 +411,113 @@ public sealed class CameraCaptureService : IAsyncDisposable
         lock (_imageLock)
         {
             return _latestImage is null ? null : (Bitmap)_latestImage.Clone();
+        }
+    }
+
+    public Bitmap? GetBestSnapshot(
+        int windowMilliseconds,
+        string? roiText)
+    {
+        int window = Math.Clamp(
+            windowMilliseconds,
+            0,
+            MaximumBestSnapshotWindowMilliseconds);
+        LastBestSnapshotSelection = null;
+        if (window <= 0)
+        {
+            return GetSnapshot();
+        }
+
+        DateTime cutoff = DateTime.UtcNow.AddMilliseconds(-window);
+        var candidates = new List<SnapshotCandidate>();
+        lock (_imageLock)
+        {
+            PruneSnapshotCandidates(
+                DateTime.UtcNow.AddMilliseconds(
+                    -MaximumBestSnapshotWindowMilliseconds));
+            foreach (SnapshotCandidate candidate in _snapshotCandidates)
+            {
+                if (candidate.CapturedAtUtc >= cutoff)
+                {
+                    candidates.Add(new SnapshotCandidate(
+                        candidate.Frame.Clone(),
+                        candidate.CapturedAtUtc));
+                }
+            }
+        }
+
+        if (candidates.Count == 0)
+        {
+            return GetSnapshot();
+        }
+
+        try
+        {
+            SnapshotCandidate? bestCandidate = null;
+            Rect scoringRoi;
+            double latestScore = CalculateSharpnessScore(
+                candidates[^1].Frame,
+                roiText,
+                out scoringRoi);
+            var scores = new List<SnapshotCandidateScore>();
+            double bestScore = double.MinValue;
+            for (int index = 0; index < candidates.Count; index++)
+            {
+                SnapshotCandidate candidate = candidates[index];
+                double score = index == candidates.Count - 1
+                    ? latestScore
+                    : CalculateSharpnessScore(
+                        candidate.Frame,
+                        roiText,
+                        out _);
+                int ageMilliseconds = (int)Math.Round(
+                    (DateTime.UtcNow - candidate.CapturedAtUtc)
+                    .TotalMilliseconds);
+                scores.Add(new SnapshotCandidateScore(
+                    index + 1,
+                    ageMilliseconds,
+                    score));
+                if (score > bestScore)
+                {
+                    bestScore = score;
+                    bestCandidate = candidate;
+                }
+            }
+
+            if (bestCandidate is null)
+            {
+                return GetSnapshot();
+            }
+
+            LastBestSnapshotSelection = new BestSnapshotSelection(
+                candidates.Count,
+                (int)Math.Round(
+                    (DateTime.UtcNow - bestCandidate.CapturedAtUtc)
+                    .TotalMilliseconds),
+                bestScore,
+                latestScore,
+                !ReferenceEquals(bestCandidate, candidates[^1]));
+            LogBestSnapshotSelection(
+                window,
+                roiText,
+                scoringRoi,
+                scores,
+                LastBestSnapshotSelection);
+            return BitmapConverter.ToBitmap(bestCandidate.Frame);
+        }
+        catch (Exception exception)
+        {
+            ENTcapture2.Core.Services.DebugLogger.Error(
+                "CameraCaptureService.GetBestSnapshot: Failed to select best frame",
+                exception);
+            return GetSnapshot();
+        }
+        finally
+        {
+            foreach (SnapshotCandidate candidate in candidates)
+            {
+                candidate.Frame.Dispose();
+            }
         }
     }
 
@@ -387,6 +553,7 @@ public sealed class CameraCaptureService : IAsyncDisposable
             _latestImage = null;
             _latestSourceFrame?.Dispose();
             _latestSourceFrame = null;
+            ClearSnapshotCandidates();
         }
     }
 
@@ -426,13 +593,26 @@ public sealed class CameraCaptureService : IAsyncDisposable
     private async Task BitmapIngestLoopAsync(CancellationToken cancellationToken)
     {
         Debug.Assert(_bitmapChannel is not null);
-        await foreach (Bitmap bitmap in _bitmapChannel.Reader.ReadAllAsync(cancellationToken))
+        try
         {
-            using (bitmap)
-            using (Mat frame = BitmapConverter.ToMat(bitmap))
+            await foreach (Bitmap bitmap in _bitmapChannel.Reader.ReadAllAsync(cancellationToken))
             {
-                EnqueueCapturedFrame(frame);
+                using (bitmap)
+                using (Mat frame = BitmapConverter.ToMat(bitmap))
+                {
+                    EnqueueCapturedFrame(frame);
+                }
             }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception)
+        {
+            ENTcapture2.Core.Services.DebugLogger.Error(
+                "CameraCaptureService.BitmapIngestLoopAsync: Error ingesting frames",
+                exception);
+            ReportCaptureFault(exception);
         }
     }
 
@@ -492,6 +672,7 @@ public sealed class CameraCaptureService : IAsyncDisposable
         long previousReceived = 0;
         long previousDisplayed = 0;
         long previousDropped = 0;
+        int stagnantInputSeconds = 0;
         var statisticsClock = Stopwatch.StartNew();
 
         while (!cancellationToken.IsCancellationRequested)
@@ -501,6 +682,26 @@ public sealed class CameraCaptureService : IAsyncDisposable
             long displayedCount = Interlocked.Read(ref _displayedFrames);
             long droppedCount = Interlocked.Read(ref _droppedFrames);
             double elapsedSeconds = statisticsClock.Elapsed.TotalSeconds;
+            long newReceivedFrames = receivedCount - previousReceived;
+            if (newReceivedFrames <= 0)
+            {
+                stagnantInputSeconds++;
+                ENTcapture2.Core.Services.DebugLogger.Warning(
+                    "CameraCaptureService: No input frames received. " +
+                    $"StagnantSeconds={stagnantInputSeconds}, " +
+                    $"Received={receivedCount}, Displayed={displayedCount}");
+                if (stagnantInputSeconds >= 3)
+                {
+                    var exception = new IOException(
+                        "No input frames were received from the camera for 3 seconds.");
+                    ReportCaptureFault(exception);
+                    return;
+                }
+            }
+            else
+            {
+                stagnantInputSeconds = 0;
+            }
 
             // Log significant frame drop events
             if (droppedCount > previousDropped)
@@ -625,6 +826,11 @@ public sealed class CameraCaptureService : IAsyncDisposable
                 using (source)
                 using (Mat processed = ApplyProcessing(source))
                 {
+                    lock (_imageLock)
+                    {
+                        AddSnapshotCandidate(processed, DateTime.UtcNow);
+                    }
+
                     if (_maximumPreviewFramesPerSecond > 0)
                     {
                         double minimumMilliseconds =
@@ -667,6 +873,7 @@ public sealed class CameraCaptureService : IAsyncDisposable
             ENTcapture2.Core.Services.DebugLogger.Error(
                 $"CameraCaptureService.ProcessingLoopAsync: Error processing frames. Processed={processedCount}", exception);
             LastRecordingError ??= exception;
+            ReportCaptureFault(exception);
         }
     }
 
@@ -796,6 +1003,10 @@ public sealed class CameraCaptureService : IAsyncDisposable
         catch (Exception exception)
         {
             LastRecordingError = exception;
+            ENTcapture2.Core.Services.DebugLogger.Error(
+                "CameraCaptureService.RecordingLoopAsync: Recording failed",
+                exception);
+            ReportCaptureFault(exception);
         }
         finally
         {
@@ -941,6 +1152,147 @@ public sealed class CameraCaptureService : IAsyncDisposable
         return result;
     }
 
+    private void ReportCaptureFault(Exception exception)
+    {
+        try
+        {
+            CaptureFaulted?.Invoke(exception);
+        }
+        catch (Exception callbackException)
+        {
+            ENTcapture2.Core.Services.DebugLogger.Error(
+                "CameraCaptureService.ReportCaptureFault: Fault callback failed",
+                callbackException);
+        }
+    }
+
+    private void AddSnapshotCandidate(Mat frame, DateTime capturedAtUtc)
+    {
+        _snapshotCandidates.Enqueue(
+            new SnapshotCandidate(frame.Clone(), capturedAtUtc));
+        PruneSnapshotCandidates(
+            capturedAtUtc.AddMilliseconds(-MaximumBestSnapshotWindowMilliseconds));
+    }
+
+    private void PruneSnapshotCandidates(DateTime cutoffUtc)
+    {
+        while (_snapshotCandidates.Count > 0 &&
+               _snapshotCandidates.Peek().CapturedAtUtc < cutoffUtc)
+        {
+            _snapshotCandidates.Dequeue().Frame.Dispose();
+        }
+    }
+
+    private void ClearSnapshotCandidates()
+    {
+        while (_snapshotCandidates.Count > 0)
+        {
+            _snapshotCandidates.Dequeue().Frame.Dispose();
+        }
+    }
+
+    private static double CalculateSharpnessScore(
+        Mat frame,
+        string? roiText,
+        out Rect scoringRoi)
+    {
+        scoringRoi = CenterCrop(ResolveSharpnessRoi(frame, roiText), 0.7);
+        using Mat roiFrame = new(frame, scoringRoi);
+        using Mat gray = new();
+        if (roiFrame.Channels() == 1)
+        {
+            roiFrame.CopyTo(gray);
+        }
+        else
+        {
+            Cv2.CvtColor(roiFrame, gray, ColorConversionCodes.BGR2GRAY);
+        }
+
+        using Mat laplacian = new();
+        Cv2.Laplacian(gray, laplacian, MatType.CV_64F);
+        Cv2.MeanStdDev(
+            laplacian,
+            out Scalar _,
+            out Scalar standardDeviation);
+        return standardDeviation.Val0 * standardDeviation.Val0;
+    }
+
+    private static void LogBestSnapshotSelection(
+        int windowMilliseconds,
+        string? roiText,
+        Rect scoringRoi,
+        IReadOnlyList<SnapshotCandidateScore> scores,
+        BestSnapshotSelection selection)
+    {
+        double ratio = selection.LatestScore <= 0
+            ? 1.0
+            : selection.BestScore / selection.LatestScore;
+        var lines = new List<string>
+        {
+            "BestSnapshot selection",
+            $"  window={windowMilliseconds}ms",
+            $"  configuredRoi=\"{roiText ?? string.Empty}\"",
+            $"  scoringRoi={scoringRoi.X},{scoringRoi.Y},{scoringRoi.Width},{scoringRoi.Height}",
+            $"  candidates={selection.CandidateCount}",
+            $"  selectedAge={selection.SelectedAgeMilliseconds}ms",
+            $"  usedBestFrame={selection.UsedBestFrame}",
+            $"  bestScore={selection.BestScore:0.###}",
+            $"  latestScore={selection.LatestScore:0.###}",
+            $"  best/latest={ratio:0.###}"
+        };
+
+        foreach (SnapshotCandidateScore score in scores)
+        {
+            lines.Add(
+                $"  frame#{score.Index:00} age={score.AgeMilliseconds,4}ms score={score.Score:0.###}");
+        }
+
+        ENTcapture2.Core.Services.DebugLogger.Info(string.Join(
+            Environment.NewLine,
+            lines));
+    }
+
+    private static Rect ResolveSharpnessRoi(Mat frame, string? roiText)
+    {
+        if (!string.IsNullOrWhiteSpace(roiText))
+        {
+            string[] parts = roiText.Split(
+                ',',
+                StringSplitOptions.TrimEntries);
+            if (parts.Length == 4 &&
+                int.TryParse(parts[0], out int x1) &&
+                int.TryParse(parts[1], out int y1) &&
+                int.TryParse(parts[2], out int x2) &&
+                int.TryParse(parts[3], out int y2))
+            {
+                int left = Math.Clamp(Math.Min(x1, x2), 0, frame.Width - 1);
+                int top = Math.Clamp(Math.Min(y1, y2), 0, frame.Height - 1);
+                int right = Math.Clamp(Math.Max(x1, x2), left + 1, frame.Width);
+                int bottom = Math.Clamp(Math.Max(y1, y2), top + 1, frame.Height);
+                return new Rect(left, top, right - left, bottom - top);
+            }
+        }
+
+        int width = Math.Max(1, (int)Math.Round(frame.Width * 0.7));
+        int height = Math.Max(1, (int)Math.Round(frame.Height * 0.7));
+        return new Rect(
+            Math.Max(0, (frame.Width - width) / 2),
+            Math.Max(0, (frame.Height - height) / 2),
+            width,
+            height);
+    }
+
+    private static Rect CenterCrop(Rect source, double ratio)
+    {
+        int width = Math.Max(1, (int)Math.Round(source.Width * ratio));
+        int height = Math.Max(1, (int)Math.Round(source.Height * ratio));
+        return new Rect(
+            source.X + Math.Max(0, (source.Width - width) / 2),
+            source.Y + Math.Max(0, (source.Height - height) / 2),
+            width,
+            height);
+    }
+
     private sealed record ProcessingOptions(
         int Red,
         int Green,
@@ -952,12 +1304,26 @@ public sealed class CameraCaptureService : IAsyncDisposable
         public static ProcessingOptions Default { get; } =
             new(255, 255, 255, 1.0, false, false);
     }
+
+    private sealed record SnapshotCandidate(Mat Frame, DateTime CapturedAtUtc);
+
+    private sealed record SnapshotCandidateScore(
+        int Index,
+        int AgeMilliseconds,
+        double Score);
 }
 
 public sealed record CaptureStatistics(
     double InputFramesPerSecond,
     double PreviewFramesPerSecond,
     long DroppedFrames);
+
+public sealed record BestSnapshotSelection(
+    int CandidateCount,
+    int SelectedAgeMilliseconds,
+    double BestScore,
+    double LatestScore,
+    bool UsedBestFrame);
 
 public sealed record RecordingOptions(
     string Directory,

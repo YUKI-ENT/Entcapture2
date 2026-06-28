@@ -9,8 +9,8 @@ using System.Threading.Tasks;
 namespace ENTcapture2.Core.Services;
 
 /// <summary>
-/// Provides file-based logging for debugging. Logs are stored in 
-/// LocalApplicationData/ENTcapture2/logs with a new file created each day.
+/// Provides file-based logging for debugging. Logs are stored in the app's
+/// LocalApplicationData folder with a new file created each day.
 /// </summary>
 public sealed class DebugLogger
 {
@@ -132,9 +132,7 @@ public sealed class DebugLogger
             return _logsDirectory;
         }
 
-        string appDataPath = Environment.GetFolderPath(
-            Environment.SpecialFolder.LocalApplicationData);
-        _logsDirectory = Path.Combine(appDataPath, "ENTcapture2", "logs");
+        _logsDirectory = AppDataPaths.LogsDirectory;
 
         try
         {

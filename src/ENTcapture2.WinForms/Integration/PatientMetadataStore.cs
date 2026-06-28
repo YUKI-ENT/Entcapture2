@@ -1,5 +1,6 @@
 using System.Text.Json;
 using ENTcapture2.Core.Models;
+using ENTcapture2.Core.Services;
 using Microsoft.Data.Sqlite;
 
 namespace ENTcapture2.WinForms.Integration;
@@ -18,6 +19,10 @@ internal sealed class PatientMetadataStore
     public PatientMetadataStore(string? databasePath = null)
     {
         _databasePath = databasePath ?? GetDefaultDatabasePath();
+        if (databasePath is null)
+        {
+            CopyLegacyDatabaseIfNeeded();
+        }
     }
 
     public async Task UpsertPatientAsync(
@@ -302,10 +307,26 @@ internal sealed class PatientMetadataStore
 
     private static string GetDefaultDatabasePath()
     {
-        return Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "ENTcapture2",
-            "entcapture2.db");
+        return AppDataPaths.DatabaseFilePath;
+    }
+
+    private static void CopyLegacyDatabaseIfNeeded()
+    {
+        if (File.Exists(AppDataPaths.DatabaseFilePath) ||
+            !File.Exists(AppDataPaths.LegacyDatabaseFilePath))
+        {
+            return;
+        }
+
+        string? directory = Path.GetDirectoryName(AppDataPaths.DatabaseFilePath);
+        if (!string.IsNullOrWhiteSpace(directory))
+        {
+            Directory.CreateDirectory(directory);
+        }
+
+        File.Copy(
+            AppDataPaths.LegacyDatabaseFilePath,
+            AppDataPaths.DatabaseFilePath);
     }
 }
 

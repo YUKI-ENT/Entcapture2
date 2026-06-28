@@ -18,6 +18,8 @@ public sealed class CapturePreset
 
     public bool IsVideo { get; set; }
 
+    public bool PreviewOnly { get; set; }
+
     public string ExaminationType { get; set; } = string.Empty;
 
     public string Roi { get; set; } = string.Empty;
@@ -52,6 +54,7 @@ public sealed class CapturePreset
             Resolution = Resolution with { },
             LegacyResolutionIndex = LegacyResolutionIndex,
             IsVideo = IsVideo,
+            PreviewOnly = PreviewOnly,
             ExaminationType = ExaminationType,
             Roi = Roi,
             OverlayText = OverlayText,

@@ -20,6 +20,16 @@ public partial class SettingsForm : Form
     private bool _isLoading;
     private bool _overlayRawEdited;
     private CapturePreset? _editingPreset;
+    private readonly PictureBox _sampleCoordinatePictureBox = new();
+    private readonly Button _sampleLoadButton = new();
+    private readonly TextBox _sampleXTextBox = new();
+    private readonly TextBox _sampleYTextBox = new();
+    private readonly Label _sampleImageInfoLabel = new();
+    private readonly CheckBox _openRsBasePatientPageCheckBox = new();
+    private readonly Label _snapshotBestFrameWindowLabel = new();
+    private readonly NumericUpDown _snapshotBestFrameWindowInput = new();
+    private readonly Label _snapshotBestFrameWindowHintLabel = new();
+    private Bitmap? _sampleCoordinateImage;
 
     public SettingsForm()
         : this(ApplicationSettings.CreateDefault(), [])
@@ -37,7 +47,11 @@ public partial class SettingsForm : Form
         _overlayGrid.RowsRemoved += OverlayGrid_Changed;
         _overlayGrid.UserAddedRow += OverlayGrid_Changed;
         _overlayGrid.UserDeletedRow += OverlayGrid_Changed;
+        _videoCheckBox.CheckedChanged += PresetOptionCheckBox_CheckedChanged;
+        _presetPreviewOnlyCheckBox.CheckedChanged +=
+            PresetOptionCheckBox_CheckedChanged;
         ConfigureRuntimePresentation();
+        FormClosed += (_, _) => DisposeSampleCoordinateImage();
         LoadSettings();
     }
 
@@ -48,10 +62,21 @@ public partial class SettingsForm : Form
 
     private void ConfigureRuntimePresentation()
     {
+        ClientSize = new Size(
+            Math.Max(ClientSize.Width, 1240),
+            Math.Max(ClientSize.Height, 940));
+        MinimumSize = new Size(
+            Math.Max(MinimumSize.Width, 1000),
+            Math.Max(MinimumSize.Height, 720));
+
         Theme.Apply(this);
         ShowSettingsPage(false);
+        ConfigureSampleCoordinatePicker();
+        ConfigureRsBasePatientPageOption();
+        ConfigureSnapshotBestFrameOption();
 
         _videoCheckBox.Text = "動画ファイリング";
+        _presetPreviewOnlyCheckBox.Text = "プレビューのみ";
         importTitleLabel.Text = "設定のインポート・エクスポート";
         importDescriptionLabel.Text =
             "ドキュメントフォルダーの entcapture2.config を既定にして読み書きします。";
@@ -103,6 +128,193 @@ public partial class SettingsForm : Form
         }
     }
 
+    private void ConfigureSampleCoordinatePicker()
+    {
+        if (_sampleCoordinatePictureBox.Parent is not null)
+        {
+            return;
+        }
+
+        roiCardPanel.Height = Math.Max(roiCardPanel.Height, 360);
+        roiCardPanel.MinimumSize = new Size(0, 360);
+        if (roiLayout.RowStyles.Count >= 3)
+        {
+            roiLayout.RowStyles[2] = new RowStyle(SizeType.Absolute, 236F);
+        }
+
+        var sampleLayout = new TableLayoutPanel
+        {
+            ColumnCount = 2,
+            Dock = DockStyle.Fill,
+            Margin = new Padding(0, 4, 0, 0),
+            RowCount = 1,
+            Tag = "raised"
+        };
+        sampleLayout.ColumnStyles.Add(
+            new ColumnStyle(SizeType.Percent, 100F));
+        sampleLayout.ColumnStyles.Add(
+            new ColumnStyle(SizeType.Absolute, 190F));
+        sampleLayout.RowStyles.Add(
+            new RowStyle(SizeType.Percent, 100F));
+
+        _sampleCoordinatePictureBox.BackColor = Color.Black;
+        _sampleCoordinatePictureBox.BorderStyle = BorderStyle.FixedSingle;
+        _sampleCoordinatePictureBox.Cursor = Cursors.Cross;
+        _sampleCoordinatePictureBox.Dock = DockStyle.Fill;
+        _sampleCoordinatePictureBox.SizeMode = PictureBoxSizeMode.Zoom;
+        _sampleCoordinatePictureBox.MouseClick +=
+            SampleCoordinatePictureBox_MouseClick;
+        sampleLayout.Controls.Add(_sampleCoordinatePictureBox, 0, 0);
+
+        var sidePanel = new TableLayoutPanel
+        {
+            ColumnCount = 2,
+            Dock = DockStyle.Top,
+            Margin = new Padding(12, 0, 0, 0),
+            RowCount = 5,
+            Tag = "raised"
+        };
+        sidePanel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 32F));
+        sidePanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+        sidePanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 34F));
+        sidePanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 34F));
+        sidePanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 34F));
+        sidePanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 48F));
+        sidePanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 60F));
+
+        _sampleLoadButton.Dock = DockStyle.Fill;
+        _sampleLoadButton.Text = "サンプル読込";
+        _sampleLoadButton.Click += SampleLoadButton_Click;
+        sidePanel.SetColumnSpan(_sampleLoadButton, 2);
+        sidePanel.Controls.Add(_sampleLoadButton, 0, 0);
+
+        var xLabel = new Label
+        {
+            Dock = DockStyle.Fill,
+            Text = "X",
+            TextAlign = ContentAlignment.MiddleLeft,
+            Tag = "text"
+        };
+        _sampleXTextBox.Dock = DockStyle.Fill;
+        _sampleXTextBox.ReadOnly = true;
+        sidePanel.Controls.Add(xLabel, 0, 1);
+        sidePanel.Controls.Add(_sampleXTextBox, 1, 1);
+
+        var yLabel = new Label
+        {
+            Dock = DockStyle.Fill,
+            Text = "Y",
+            TextAlign = ContentAlignment.MiddleLeft,
+            Tag = "text"
+        };
+        _sampleYTextBox.Dock = DockStyle.Fill;
+        _sampleYTextBox.ReadOnly = true;
+        sidePanel.Controls.Add(yLabel, 0, 2);
+        sidePanel.Controls.Add(_sampleYTextBox, 1, 2);
+
+        _sampleImageInfoLabel.Dock = DockStyle.Fill;
+        _sampleImageInfoLabel.Text = "画像未読込";
+        _sampleImageInfoLabel.TextAlign = ContentAlignment.MiddleLeft;
+        sidePanel.SetColumnSpan(_sampleImageInfoLabel, 2);
+        sidePanel.Controls.Add(_sampleImageInfoLabel, 0, 3);
+
+        var hintLabel = new Label
+        {
+            Dock = DockStyle.Fill,
+            Text = "クリックした画像上の座標を表示します。",
+            Tag = "text"
+        };
+        sidePanel.SetColumnSpan(hintLabel, 2);
+        sidePanel.Controls.Add(hintLabel, 0, 4);
+        sampleLayout.Controls.Add(sidePanel, 1, 0);
+
+        roiLayout.Controls.Add(sampleLayout, 0, 2);
+        Theme.Apply(sampleLayout);
+    }
+
+    private void ConfigureRsBasePatientPageOption()
+    {
+        if (_openRsBasePatientPageCheckBox.Parent is not null)
+        {
+            return;
+        }
+
+        _openRsBasePatientPageCheckBox.AutoSize = true;
+        _openRsBasePatientPageCheckBox.Margin = new Padding(3, 3, 0, 0);
+        _openRsBasePatientPageCheckBox.Text =
+            "取込後に患者ページをブラウザで開く";
+
+        if (integrationLayout.RowCount < 5)
+        {
+            integrationLayout.RowCount = 5;
+            integrationLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 32F));
+        }
+
+        integrationLayout.SetColumnSpan(_openRsBasePatientPageCheckBox, 2);
+        integrationLayout.Controls.Add(_openRsBasePatientPageCheckBox,1, 4);
+        Theme.Apply(_openRsBasePatientPageCheckBox);
+    }
+
+    private void ConfigureSnapshotBestFrameOption()
+    {
+        if (_snapshotBestFrameWindowInput.Parent is not null)
+        {
+            return;
+        }
+
+        if (hotkeyCardLayout.RowCount < 6)
+        {
+            hotkeyCardLayout.RowCount = 6;
+            hotkeyCardLayout.RowStyles.Clear();
+            hotkeyCardLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 30F));
+            hotkeyCardLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 38F));
+            hotkeyCardLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 38F));
+            hotkeyCardLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 38F));
+            hotkeyCardLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 38F));
+            hotkeyCardLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+        }
+
+        hotkeyCardLayout.SetRow(snapshotHotkeyLabel, 3);
+        hotkeyCardLayout.SetRow(_snapshotHotkeyTextBox, 3);
+        hotkeyCardLayout.SetRow(captureHotkeyLabel, 4);
+        hotkeyCardLayout.SetRow(_captureHotkeyTextBox, 4);
+        hotkeyCardLayout.SetRow(label1, 5);
+
+        _snapshotBestFrameWindowLabel.Anchor = AnchorStyles.Left;
+        _snapshotBestFrameWindowLabel.AutoSize = true;
+        _snapshotBestFrameWindowLabel.Text = "ブレ防止時間(ms)";
+
+        _snapshotBestFrameWindowInput.Anchor = AnchorStyles.Left;
+        _snapshotBestFrameWindowInput.Increment = 100;
+        _snapshotBestFrameWindowInput.Maximum = 1000;
+        _snapshotBestFrameWindowInput.Minimum = 0;
+        _snapshotBestFrameWindowInput.Size = new Size(120, 23);
+        _snapshotBestFrameWindowInput.Value = 300;
+
+        _snapshotBestFrameWindowHintLabel.Anchor = AnchorStyles.Left;
+        _snapshotBestFrameWindowHintLabel.AutoSize = true;
+        _snapshotBestFrameWindowHintLabel.Margin = new Padding(8, 4, 0, 0);
+        _snapshotBestFrameWindowHintLabel.Text = "0で無効";
+        _snapshotBestFrameWindowHintLabel.Tag = "muted";
+
+        var bestFramePanel = new FlowLayoutPanel
+        {
+            AutoSize = true,
+            Dock = DockStyle.Fill,
+            FlowDirection = FlowDirection.LeftToRight,
+            Margin = Padding.Empty,
+            WrapContents = false
+        };
+        bestFramePanel.Controls.Add(_snapshotBestFrameWindowInput);
+        bestFramePanel.Controls.Add(_snapshotBestFrameWindowHintLabel);
+
+        hotkeyCardLayout.Controls.Add(_snapshotBestFrameWindowLabel, 0, 2);
+        hotkeyCardLayout.Controls.Add(bestFramePanel, 1, 2);
+        Theme.Apply(_snapshotBestFrameWindowLabel);
+        Theme.Apply(_snapshotBestFrameWindowInput);
+        Theme.Apply(_snapshotBestFrameWindowHintLabel);
+    }
+
     private void LoadSettings()
     {
         _isLoading = true;
@@ -114,11 +326,10 @@ public partial class SettingsForm : Form
                 Settings.SnapshotDebounceMilliseconds,
                 0,
                 10000);
-            _continuousRecordingRadioButton.Checked =
-                Settings.CaptureMode ==
-                CaptureOperationMode.ContinuousTemporaryRecording;
-            _previewOnlyRadioButton.Checked =
-                Settings.CaptureMode == CaptureOperationMode.PreviewOnly;
+            _snapshotBestFrameWindowInput.Value = Math.Clamp(
+                Settings.SnapshotBestFrameWindowMilliseconds,
+                0,
+                1000);
             _topMostDuringPreviewCheckBox.Checked =
                 Settings.TopMostDuringPreview;
             _temporaryDirectoryTextBox.Text =
@@ -150,6 +361,8 @@ public partial class SettingsForm : Form
             _rsBaseDirectoryTextBox.Text = Settings.RsBaseTheptDirectory;
             _rsBaseReloadUrlTextBox.Text = Settings.RsBaseReloadUrl;
             _autoFileCheckBox.Checked = Settings.AutoFileToRsBase;
+            _openRsBasePatientPageCheckBox.Checked =
+                Settings.OpenRsBasePatientPageAfterFiling;
             RefreshPresetList(Settings.SelectedPresetId);
         }
         finally
@@ -243,6 +456,8 @@ public partial class SettingsForm : Form
             _nameTextBox.Text = preset.Name;
             _examinationTextBox.Text = preset.ExaminationType;
             _videoCheckBox.Checked = preset.IsVideo;
+            _presetPreviewOnlyCheckBox.Checked = preset.PreviewOnly;
+            ApplyPresetOptionRules(null);
             _fpsInput.Value = Math.Clamp(preset.FramesPerSecond, 0, 240);
 
             CameraDeviceInfo? device = FindDevice(preset);
@@ -278,6 +493,7 @@ public partial class SettingsForm : Form
         _resolutionComboBox.Items.Clear();
         _fpsInput.Value = 0;
         _videoCheckBox.Checked = false;
+        _presetPreviewOnlyCheckBox.Checked = false;
         _roiX1Input.Value = 0;
         _roiY1Input.Value = 0;
         _roiX2Input.Value = 0;
@@ -301,6 +517,8 @@ public partial class SettingsForm : Form
             : _nameTextBox.Text.Trim();
         preset.ExaminationType = _examinationTextBox.Text.Trim();
         preset.IsVideo = _videoCheckBox.Checked;
+        preset.PreviewOnly = _presetPreviewOnlyCheckBox.Checked &&
+            !preset.IsVideo;
         preset.FramesPerSecond = decimal.ToInt32(_fpsInput.Value);
         preset.FontName = _fontComboBox.Text.Trim();
 
@@ -327,6 +545,45 @@ public partial class SettingsForm : Form
             ? _overlayRawTextBox.Text.Trim()
             : SerializeOverlayRows();
         _presetList.Refresh();
+    }
+
+    private void ApplyPresetOptionRules(object? changedControl)
+    {
+        if (ReferenceEquals(changedControl, _videoCheckBox) &&
+            _videoCheckBox.Checked)
+        {
+            _presetPreviewOnlyCheckBox.Checked = false;
+        }
+        else if (ReferenceEquals(changedControl, _presetPreviewOnlyCheckBox) &&
+                 _presetPreviewOnlyCheckBox.Checked)
+        {
+            _videoCheckBox.Checked = false;
+        }
+        else if (_videoCheckBox.Checked &&
+                 _presetPreviewOnlyCheckBox.Checked)
+        {
+            _presetPreviewOnlyCheckBox.Checked = false;
+        }
+    }
+
+    private void PresetOptionCheckBox_CheckedChanged(
+        object? sender,
+        EventArgs e)
+    {
+        if (_isLoading)
+        {
+            return;
+        }
+
+        _isLoading = true;
+        try
+        {
+            ApplyPresetOptionRules(sender);
+        }
+        finally
+        {
+            _isLoading = false;
+        }
     }
 
     private void DeviceComboBox_SelectedIndexChanged(object? sender, EventArgs e)
@@ -446,6 +703,118 @@ public partial class SettingsForm : Form
         {
             _snapshotDirectoryTextBox.Text = dialog.SelectedPath;
         }
+    }
+
+    private void SampleLoadButton_Click(object? sender, EventArgs e)
+    {
+        using var dialog = new OpenFileDialog
+        {
+            Filter =
+                "画像ファイル (*.bmp;*.jpg;*.jpeg;*.png;*.gif)|*.bmp;*.jpg;*.jpeg;*.png;*.gif|すべてのファイル (*.*)|*.*",
+            Title = "座標確認用のサンプル画像を選択"
+        };
+        if (dialog.ShowDialog(this) != DialogResult.OK)
+        {
+            return;
+        }
+
+        try
+        {
+            using Image loaded = Image.FromFile(dialog.FileName);
+            var bitmap = new Bitmap(loaded);
+            DisposeSampleCoordinateImage();
+            _sampleCoordinateImage = bitmap;
+            _sampleCoordinatePictureBox.Image = _sampleCoordinateImage;
+            _sampleXTextBox.Clear();
+            _sampleYTextBox.Clear();
+            _sampleImageInfoLabel.Text =
+                $"{_sampleCoordinateImage.Width} x {_sampleCoordinateImage.Height}";
+        }
+        catch (Exception exception)
+        {
+            MessageBox.Show(
+                this,
+                $"画像を読み込めませんでした。\r\n{exception.Message}",
+                "サンプル読込",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning);
+        }
+    }
+
+    private void SampleCoordinatePictureBox_MouseClick(
+        object? sender,
+        MouseEventArgs e)
+    {
+        if (_sampleCoordinateImage is null ||
+            _sampleCoordinatePictureBox.Image is null)
+        {
+            return;
+        }
+
+        Rectangle imageBounds = GetZoomedImageBounds(
+            _sampleCoordinatePictureBox,
+            _sampleCoordinateImage.Size);
+        if (!imageBounds.Contains(e.Location) ||
+            imageBounds.Width <= 0 ||
+            imageBounds.Height <= 0)
+        {
+            return;
+        }
+
+        int x = (int)Math.Floor(
+            (e.X - imageBounds.Left) *
+            _sampleCoordinateImage.Width /
+            (double)imageBounds.Width);
+        int y = (int)Math.Floor(
+            (e.Y - imageBounds.Top) *
+            _sampleCoordinateImage.Height /
+            (double)imageBounds.Height);
+        x = Math.Clamp(x, 0, _sampleCoordinateImage.Width - 1);
+        y = Math.Clamp(y, 0, _sampleCoordinateImage.Height - 1);
+
+        _sampleXTextBox.Text = x.ToString();
+        _sampleYTextBox.Text = y.ToString();
+    }
+
+    private static Rectangle GetZoomedImageBounds(
+        PictureBox pictureBox,
+        Size imageSize)
+    {
+        if (imageSize.Width <= 0 ||
+            imageSize.Height <= 0 ||
+            pictureBox.ClientSize.Width <= 0 ||
+            pictureBox.ClientSize.Height <= 0)
+        {
+            return Rectangle.Empty;
+        }
+
+        double imageRatio = imageSize.Width / (double)imageSize.Height;
+        double boxRatio =
+            pictureBox.ClientSize.Width / (double)pictureBox.ClientSize.Height;
+
+        int width;
+        int height;
+        if (boxRatio > imageRatio)
+        {
+            height = pictureBox.ClientSize.Height;
+            width = (int)Math.Round(height * imageRatio);
+        }
+        else
+        {
+            width = pictureBox.ClientSize.Width;
+            height = (int)Math.Round(width / imageRatio);
+        }
+
+        int left = (pictureBox.ClientSize.Width - width) / 2;
+        int top = (pictureBox.ClientSize.Height - height) / 2;
+        return new Rectangle(left, top, width, height);
+    }
+
+    private void DisposeSampleCoordinateImage()
+    {
+        _sampleCoordinatePictureBox.Image = null;
+        _sampleCoordinateImage?.Dispose();
+        _sampleCoordinateImage = null;
     }
 
     private void BrowseTemporaryDirectoryButton_Click(
@@ -811,9 +1180,8 @@ public partial class SettingsForm : Form
         Settings.JpegQuality = decimal.ToInt32(_jpegQualityInput.Value);
         Settings.SnapshotDebounceMilliseconds =
             decimal.ToInt32(_snapshotDebounceInput.Value);
-        Settings.CaptureMode = _previewOnlyRadioButton.Checked
-            ? CaptureOperationMode.PreviewOnly
-            : CaptureOperationMode.ContinuousTemporaryRecording;
+        Settings.SnapshotBestFrameWindowMilliseconds =
+            decimal.ToInt32(_snapshotBestFrameWindowInput.Value);
         Settings.TopMostDuringPreview = _topMostDuringPreviewCheckBox.Checked;
         Settings.TemporaryRecordingDirectory =
             string.IsNullOrWhiteSpace(_temporaryDirectoryTextBox.Text)
@@ -857,6 +1225,8 @@ public partial class SettingsForm : Form
         Settings.RsBaseReloadUrl =
             _rsBaseReloadUrlTextBox.Text.Trim();
         Settings.AutoFileToRsBase = _autoFileCheckBox.Checked;
+        Settings.OpenRsBasePatientPageAfterFiling =
+            _openRsBasePatientPageCheckBox.Checked;
         if (Settings.SelectedPresetId is null ||
             Settings.Presets.All(item => item.Id != Settings.SelectedPresetId))
         {
@@ -908,9 +1278,8 @@ public partial class SettingsForm : Form
         Settings.JpegQuality = decimal.ToInt32(_jpegQualityInput.Value);
         Settings.SnapshotDebounceMilliseconds =
             decimal.ToInt32(_snapshotDebounceInput.Value);
-        Settings.CaptureMode = _previewOnlyRadioButton.Checked
-            ? CaptureOperationMode.PreviewOnly
-            : CaptureOperationMode.ContinuousTemporaryRecording;
+        Settings.SnapshotBestFrameWindowMilliseconds =
+            decimal.ToInt32(_snapshotBestFrameWindowInput.Value);
         Settings.TopMostDuringPreview = _topMostDuringPreviewCheckBox.Checked;
         Settings.TemporaryRecordingDirectory =
             string.IsNullOrWhiteSpace(_temporaryDirectoryTextBox.Text)
@@ -954,6 +1323,8 @@ public partial class SettingsForm : Form
         Settings.RsBaseReloadUrl =
             _rsBaseReloadUrlTextBox.Text.Trim();
         Settings.AutoFileToRsBase = _autoFileCheckBox.Checked;
+        Settings.OpenRsBasePatientPageAfterFiling =
+            _openRsBasePatientPageCheckBox.Checked;
         if (Settings.SelectedPresetId is null ||
             Settings.Presets.All(item => item.Id != Settings.SelectedPresetId))
         {
@@ -1097,7 +1468,9 @@ public partial class SettingsForm : Form
             JpegQuality = source.JpegQuality,
             SnapshotDebounceMilliseconds =
                 source.SnapshotDebounceMilliseconds,
-            CaptureMode = source.CaptureMode,
+            SnapshotBestFrameWindowMilliseconds =
+                source.SnapshotBestFrameWindowMilliseconds,
+            CaptureMode = CaptureOperationMode.ContinuousTemporaryRecording,
             TopMostDuringPreview = source.TopMostDuringPreview,
             TemporaryRecordingDirectory = source.TemporaryRecordingDirectory,
             TemporaryRecordingCodec = source.TemporaryRecordingCodec,
@@ -1117,6 +1490,8 @@ public partial class SettingsForm : Form
             RsBaseTheptDirectory = source.RsBaseTheptDirectory,
             RsBaseReloadUrl = source.RsBaseReloadUrl,
             AutoFileToRsBase = source.AutoFileToRsBase,
+            OpenRsBasePatientPageAfterFiling =
+                source.OpenRsBasePatientPageAfterFiling,
             MainWindowLeft = source.MainWindowLeft,
             MainWindowTop = source.MainWindowTop,
             MainWindowWidth = source.MainWindowWidth,
@@ -1141,6 +1516,7 @@ public partial class SettingsForm : Form
             Resolution = source.Resolution with { },
             LegacyResolutionIndex = source.LegacyResolutionIndex,
             IsVideo = source.IsVideo,
+            PreviewOnly = source.PreviewOnly,
             ExaminationType = source.ExaminationType,
             Roi = source.Roi,
             OverlayText = source.OverlayText,

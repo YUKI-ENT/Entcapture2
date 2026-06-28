@@ -15,7 +15,11 @@ public sealed class JsonSettingsStore : ISettingsStore
 
     public JsonSettingsStore(string? settingsFilePath = null)
     {
-        SettingsFilePath = settingsFilePath ?? GetDefaultSettingsFilePath();
+        SettingsFilePath = settingsFilePath ?? AppDataPaths.SettingsFilePath;
+        if (settingsFilePath is null)
+        {
+            CopyLegacySettingsIfNeeded();
+        }
     }
 
     public string SettingsFilePath { get; }
@@ -78,12 +82,23 @@ public sealed class JsonSettingsStore : ISettingsStore
         }
     }
 
-    private static string GetDefaultSettingsFilePath()
+    private static void CopyLegacySettingsIfNeeded()
     {
-        string localApplicationData =
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        if (File.Exists(AppDataPaths.SettingsFilePath) ||
+            !File.Exists(AppDataPaths.LegacySettingsFilePath))
+        {
+            return;
+        }
 
-        return Path.Combine(localApplicationData, "ENTcapture2", "settings.json");
+        string? directory = Path.GetDirectoryName(AppDataPaths.SettingsFilePath);
+        if (!string.IsNullOrWhiteSpace(directory))
+        {
+            Directory.CreateDirectory(directory);
+        }
+
+        File.Copy(
+            AppDataPaths.LegacySettingsFilePath,
+            AppDataPaths.SettingsFilePath);
     }
 
     public static void Validate(ApplicationSettings settings)
@@ -104,6 +119,8 @@ public sealed class JsonSettingsStore : ISettingsStore
         settings.JpegQuality = Math.Clamp(settings.JpegQuality, 1, 100);
         settings.SnapshotDebounceMilliseconds =
             Math.Clamp(settings.SnapshotDebounceMilliseconds, 0, 10000);
+        settings.SnapshotBestFrameWindowMilliseconds =
+            Math.Clamp(settings.SnapshotBestFrameWindowMilliseconds, 0, 1000);
         settings.TemporaryRecordingDirectory =
             string.IsNullOrWhiteSpace(settings.TemporaryRecordingDirectory)
                 ? Path.Combine(Path.GetTempPath(), "ENTcapture2")
@@ -186,6 +203,21 @@ public sealed class JsonSettingsStore : ISettingsStore
             preset.WhiteBalanceGreen = Math.Clamp(preset.WhiteBalanceGreen, 0, 510);
             preset.WhiteBalanceBlue = Math.Clamp(preset.WhiteBalanceBlue, 0, 510);
             preset.Gamma = Math.Clamp(preset.Gamma, 0.1, 3.0);
+            if (preset.IsVideo)
+            {
+                preset.PreviewOnly = false;
+            }
+        }
+
+        if (settings.CaptureMode == CaptureOperationMode.PreviewOnly)
+        {
+            foreach (CapturePreset preset in settings.Presets)
+            {
+                preset.PreviewOnly = !preset.IsVideo;
+            }
+
+            settings.CaptureMode =
+                CaptureOperationMode.ContinuousTemporaryRecording;
         }
     }
 

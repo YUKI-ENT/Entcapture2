@@ -5,6 +5,9 @@ namespace ENTcapture2.WinForms;
 
 internal static class Program
 {
+    private const string SingleInstanceMutexName =
+        @"Local\ENTcapture2.WinForms.SingleInstance";
+
     [STAThread]
     private static void Main(string[] args)
     {
@@ -25,12 +28,26 @@ internal static class Program
             return;
         }
 
-        ApplicationConfiguration.Initialize();
-        Application.SetColorMode(SystemColorMode.Dark);
+        using var mutex = new Mutex(
+            false,
+            SingleInstanceMutexName,
+            out bool createdNew);
+        if (!createdNew)
+        {
+            return;
+        }
 
-        ISettingsStore settingsStore = new JsonSettingsStore();
-        Application.Run(new MainForm(settingsStore));
+        try
+        {
+            ApplicationConfiguration.Initialize();
+            Application.SetColorMode(SystemColorMode.Dark);
 
-        DebugLogger.Shutdown();
+            ISettingsStore settingsStore = new JsonSettingsStore();
+            Application.Run(new MainForm(settingsStore));
+        }
+        finally
+        {
+            DebugLogger.Shutdown();
+        }
     }
 }

@@ -3803,6 +3803,7 @@ public partial class MainForm : Form
 
         if (!_previewZoomForm.Visible)
         {
+            PlaceZoomWindowNearMainForm(_previewZoomForm);
             _previewZoomForm.Show(this);
         }
 
@@ -3844,6 +3845,33 @@ public partial class MainForm : Form
             area.Width * 0.9 / imageSize.Width,
             area.Height * 0.85 / imageSize.Height);
         return Math.Clamp(Math.Min(1.0, scale), 0.1, 2.0);
+    }
+
+    private void PlaceZoomWindowNearMainForm(Form zoomForm)
+    {
+        Rectangle area = Screen.FromControl(this).WorkingArea;
+        const int gap = 12;
+        int x = Right + gap;
+        if (x + zoomForm.Width > area.Right)
+        {
+            x = Left - zoomForm.Width - gap;
+        }
+
+        if (x < area.Left || x + zoomForm.Width > area.Right)
+        {
+            x = Math.Clamp(
+                Left + (Width - zoomForm.Width) / 2,
+                area.Left,
+                Math.Max(area.Left, area.Right - zoomForm.Width));
+        }
+
+        int y = Math.Clamp(
+            Top,
+            area.Top,
+            Math.Max(area.Top, area.Bottom - zoomForm.Height));
+
+        zoomForm.StartPosition = FormStartPosition.Manual;
+        zoomForm.Location = new Point(x, y);
     }
 
     private void UpdatePreviewZoomForm(Bitmap bitmap)

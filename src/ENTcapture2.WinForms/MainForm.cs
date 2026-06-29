@@ -18,6 +18,7 @@ public partial class MainForm : Form
     private const int QuickPresetCount = 5;
     private const int MaxSnapshotThumbnails = 8;
     private const int WindowSnapDistance = 18;
+    private const int CapturedFileMetadataRetentionDays = 90;
     private const int WmWindowPosChanging = 0x0046;
     private const int SwpNoSize = 0x0001;
     private const int SwpNoMove = 0x0002;
@@ -1039,6 +1040,7 @@ public partial class MainForm : Form
             UpdateHeaderOptions();
             UpdateCaptureModePresentation();
             UpdateRsBaseImportButtonVisibility();
+            await CleanupCapturedFileMetadataAsync();
             StartExternalIntegrations();
             CleanupTemporaryRecordings();
             RefreshPresetControls();
@@ -1056,6 +1058,21 @@ public partial class MainForm : Form
         catch (Exception exception)
         {
             ShowError("初期化に失敗しました。", exception);
+        }
+    }
+
+    private async Task CleanupCapturedFileMetadataAsync()
+    {
+        try
+        {
+            await _metadataStore.DeleteCapturedFilesOlderThanAsync(
+                TimeSpan.FromDays(CapturedFileMetadataRetentionDays));
+        }
+        catch (Exception exception)
+        {
+            ENTcapture2.Core.Services.DebugLogger.Error(
+                "Metadata cleanup failed",
+                exception);
         }
     }
 

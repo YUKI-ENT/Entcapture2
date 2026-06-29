@@ -166,6 +166,40 @@ internal sealed class PatientMetadataStore
             cancellationToken);
     }
 
+    public async Task<int> DeleteCapturedFilesOlderThanAsync(
+        TimeSpan retention,
+        CancellationToken cancellationToken = default)
+    {
+        if (retention <= TimeSpan.Zero)
+        {
+            return 0;
+        }
+
+        await EnsureInitializedAsync(cancellationToken);
+        DateTime cutoff = DateTime.Now.Subtract(retention);
+        await using SqliteConnection connection = OpenConnection();
+        await using SqliteCommand command = connection.CreateCommand();
+        command.CommandText =
+            """
+            DELETE FROM CapturedFiles
+            WHERE CapturedAt <> ''
+              AND CapturedAt < $cutoff;
+            """;
+        command.Parameters.AddWithValue("$cutoff", cutoff.ToString("O"));
+        int deleted = await command.ExecuteNonQueryAsync(cancellationToken);
+        ENTcapture2.Core.Services.DebugLogger.Info(
+            "Metadata cleanup" +
+            Environment.NewLine +
+            $"  table=CapturedFiles" +
+            Environment.NewLine +
+            $"  retentionDays={retention.TotalDays:0.#}" +
+            Environment.NewLine +
+            $"  cutoff={cutoff:O}" +
+            Environment.NewLine +
+            $"  deletedRows={deleted}");
+        return deleted;
+    }
+
     public static ParsedCaptureFileName? ParseCaptureFileName(string filePath)
     {
         string stem = Path.GetFileNameWithoutExtension(filePath);

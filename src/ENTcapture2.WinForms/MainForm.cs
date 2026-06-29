@@ -2317,13 +2317,20 @@ public partial class MainForm : Form
 
         try
         {
-            System.Diagnostics.Debug.WriteLine($"[DEBUG] ApplyPlaybackMetadataAsync: searching DB for file: {firstFile}");
+            ENTcapture2.Core.Services.DebugLogger.Info(
+                "Playback metadata restore: start" +
+                Environment.NewLine +
+                $"  file={firstFile}" +
+                Environment.NewLine +
+                $"  selectedFiles={filePaths.Count}");
             CapturedFileMetadata? metadata =
                 await _metadataStore.FindFileAsync(firstFile);
-            System.Diagnostics.Debug.WriteLine($"[DEBUG] ApplyPlaybackMetadataAsync: metadata found = {metadata is not null}");
+            ENTcapture2.Core.Services.DebugLogger.Info(
+                "Playback metadata restore: database lookup" +
+                Environment.NewLine +
+                $"  found={metadata is not null}");
             if (metadata is not null)
             {
-                System.Diagnostics.Debug.WriteLine($"[DEBUG] ApplyPlaybackMetadata: PresetId={metadata.PresetId} PresetName={metadata.PresetName} Preset={metadata.Preset is not null}");
                 ApplyPlaybackMetadata(metadata);
                 return;
             }
@@ -2332,7 +2339,10 @@ public partial class MainForm : Form
                 PatientMetadataStore.ParseCaptureFileName(firstFile);
             if (parsed is null)
             {
-                System.Diagnostics.Debug.WriteLine($"[DEBUG] ApplyPlaybackMetadataAsync: ParseCaptureFileName returned null");
+                ENTcapture2.Core.Services.DebugLogger.Info(
+                    "Playback metadata restore: fallback skipped" +
+                    Environment.NewLine +
+                    "  reason=file name could not be parsed");
                 return;
             }
 
@@ -2342,9 +2352,33 @@ public partial class MainForm : Form
             _patientIdTextBox.Text = parsed.PatientId;
             _patientNameTextBox.Text = patientName;
             SetExaminationTypeTextWithoutPresetUpdate(parsed.ExaminationName);
-            _playbackCapturePreset =
-                CreatePlaybackFallbackPreset(parsed.ExaminationName);
+            PlaybackPresetMatch parsedPresetMatch =
+                FindPresetForPlayback(null, null, parsed.ExaminationName);
+            _playbackCapturePreset = parsedPresetMatch.Preset is null
+                ? CreatePlaybackFallbackPreset(parsed.ExaminationName)
+                : CreatePlaybackPresetFromPreset(parsedPresetMatch.Preset);
             _playbackCapturedAt = parsed.CapturedAt;
+            if (parsedPresetMatch.Preset is not null)
+            {
+                ApplyPlaybackPresetSelection(parsedPresetMatch.Preset);
+            }
+
+            ENTcapture2.Core.Services.DebugLogger.Info(
+                "Playback metadata restore: file-name fallback" +
+                Environment.NewLine +
+                $"  patientId={parsed.PatientId}" +
+                Environment.NewLine +
+                $"  examinationName={parsed.ExaminationName}" +
+                Environment.NewLine +
+                $"  capturedAt={parsed.CapturedAt:O}" +
+                Environment.NewLine +
+                $"  presetMatched={parsedPresetMatch.Preset is not null}" +
+                Environment.NewLine +
+                $"  matchSource={parsedPresetMatch.Source}" +
+                Environment.NewLine +
+                $"  appliedPresetId={parsedPresetMatch.Preset?.Id}" +
+                Environment.NewLine +
+                $"  appliedPresetName={parsedPresetMatch.Preset?.Name}");
             _presetLabel.Text = "プリセット: なし（再生ファイル）";
         }
         catch (Exception exception)
@@ -2352,22 +2386,63 @@ public partial class MainForm : Form
             _statusLabel.Text =
                 "● 再生メタデータ復元に失敗: " + exception.Message;
             _statusLabel.ForeColor = Theme.Danger;
-            System.Diagnostics.Debug.WriteLine($"[DEBUG] ApplyPlaybackMetadataAsync exception: {exception}");
+            ENTcapture2.Core.Services.DebugLogger.Error(
+                "Playback metadata restore: failed",
+                exception);
         }
     }
 
     private void ApplyPlaybackMetadata(CapturedFileMetadata metadata)
     {
-        CapturePreset? preset =
-            metadata.PresetId is { } presetId
-                ? _settings.Presets.FirstOrDefault(item => item.Id == presetId)
-                : null;
-        CapturePreset? originalPreset = metadata.Preset ?? preset;
+        PlaybackPresetMatch presetMatch = FindPresetForPlayback(
+            metadata.PresetId,
+            metadata.PresetName,
+            metadata.ExaminationName,
+            metadata.Preset?.Name);
+        CapturePreset? preset = presetMatch.Preset;
+        CapturePreset? originalPreset = preset ?? metadata.Preset;
         _playbackCapturedAt = metadata.CapturedAt;
+
+        ENTcapture2.Core.Services.DebugLogger.Info(
+            "Playback metadata restore: database metadata" +
+            Environment.NewLine +
+            $"  patientId={metadata.PatientId}" +
+            Environment.NewLine +
+            $"  patientName={metadata.PatientName}" +
+            Environment.NewLine +
+            $"  examinationName={metadata.ExaminationName}" +
+            Environment.NewLine +
+            $"  capturedAt={metadata.CapturedAt:O}" +
+            Environment.NewLine +
+            $"  storedPresetId={metadata.PresetId}" +
+            Environment.NewLine +
+            $"  storedPresetName={metadata.PresetName}" +
+            Environment.NewLine +
+            $"  storedPresetJson={metadata.Preset is not null}" +
+            Environment.NewLine +
+            $"  currentPresetMatched={preset is not null}" +
+            Environment.NewLine +
+            $"  matchSource={presetMatch.Source}" +
+            Environment.NewLine +
+            $"  appliedPresetId={originalPreset?.Id}" +
+            Environment.NewLine +
+            $"  appliedPresetName={originalPreset?.Name}");
 
         // For playback, preserve ROI and metadata but clear filters to avoid double-filtering.
         if (originalPreset is not null)
         {
+            ENTcapture2.Core.Services.DebugLogger.Info(
+                "Playback metadata restore: preset settings applied" +
+                Environment.NewLine +
+                $"  presetId={originalPreset.Id}" +
+                Environment.NewLine +
+                $"  presetName={originalPreset.Name}" +
+                Environment.NewLine +
+                $"  roi=\"{originalPreset.Roi}\"" +
+                Environment.NewLine +
+                $"  overlayConfigured={!string.IsNullOrWhiteSpace(originalPreset.OverlayText)}" +
+                Environment.NewLine +
+                $"  source={(ReferenceEquals(originalPreset, preset) ? "currentPreset" : "storedPresetJson")}");
             _playbackCapturePreset = new CapturePreset
             {
                 Id = originalPreset.Id,
@@ -2395,6 +2470,12 @@ public partial class MainForm : Form
         }
         else
         {
+            ENTcapture2.Core.Services.DebugLogger.Info(
+                "Playback metadata restore: fallback preset applied" +
+                Environment.NewLine +
+                "  reason=no matching current preset and no stored preset json" +
+                Environment.NewLine +
+                $"  examinationName={metadata.ExaminationName}");
             _playbackCapturePreset =
                 CreatePlaybackFallbackPreset(metadata.ExaminationName);
         }
@@ -2427,6 +2508,14 @@ public partial class MainForm : Form
         // Update preset button UI to reflect the loaded preset.
         if (preset is not null)
         {
+            ENTcapture2.Core.Services.DebugLogger.Info(
+                "Playback metadata restore: preset UI selection applied" +
+                Environment.NewLine +
+                $"  presetId={preset.Id}" +
+                Environment.NewLine +
+                $"  presetName={preset.Name}" +
+                Environment.NewLine +
+                $"  matchSource={presetMatch.Source}");
             _selectedPreset = preset;
             _isUpdatingPresetControls = true;
             try
@@ -2451,6 +2540,107 @@ public partial class MainForm : Form
             {
                 _isUpdatingPresetControls = false;
             }
+        }
+    }
+
+    private PlaybackPresetMatch FindPresetForPlayback(
+        Guid? presetId,
+        params string?[] names)
+    {
+        if (presetId is { } id)
+        {
+            CapturePreset? byId =
+                _settings.Presets.FirstOrDefault(item => item.Id == id);
+            if (byId is not null)
+            {
+                return new PlaybackPresetMatch(byId, "presetId");
+            }
+        }
+
+        foreach (string name in names
+                     .Where(item => !string.IsNullOrWhiteSpace(item))
+                     .Select(item => item!.Trim()))
+        {
+            CapturePreset? byPresetName = _settings.Presets.FirstOrDefault(
+                item => string.Equals(
+                    item.Name,
+                    name,
+                    StringComparison.CurrentCultureIgnoreCase));
+            if (byPresetName is not null)
+            {
+                return new PlaybackPresetMatch(byPresetName, "presetName");
+            }
+
+            CapturePreset? byExaminationName = _settings.Presets.FirstOrDefault(
+                item => string.Equals(
+                    item.ExaminationType,
+                    name,
+                    StringComparison.CurrentCultureIgnoreCase));
+            if (byExaminationName is not null)
+            {
+                return new PlaybackPresetMatch(
+                    byExaminationName,
+                    "examinationName");
+            }
+        }
+
+        return new PlaybackPresetMatch(null, "none");
+    }
+
+    private static CapturePreset CreatePlaybackPresetFromPreset(
+        CapturePreset source)
+    {
+        return new CapturePreset
+        {
+            Id = source.Id,
+            Name = source.Name,
+            DeviceId = source.DeviceId,
+            DeviceName = source.DeviceName,
+            DeviceIndex = source.DeviceIndex,
+            Resolution = source.Resolution,
+            LegacyResolutionIndex = source.LegacyResolutionIndex,
+            IsVideo = source.IsVideo,
+            PreviewOnly = source.PreviewOnly,
+            ExaminationType = source.ExaminationType,
+            Roi = source.Roi,
+            OverlayText = source.OverlayText,
+            FontName = source.FontName,
+            FramesPerSecond = source.FramesPerSecond,
+            WhiteBalanceRed = 255,
+            WhiteBalanceGreen = 255,
+            WhiteBalanceBlue = 255,
+            Gamma = 1.0,
+            FlipHorizontal = false,
+            FlipVertical = false,
+            SimpleNbi = false
+        };
+    }
+
+    private void ApplyPlaybackPresetSelection(CapturePreset preset)
+    {
+        _selectedPreset = preset;
+        _isUpdatingPresetControls = true;
+        try
+        {
+            foreach (RadioButton button in _quickPresetPanel.Controls.OfType<RadioButton>())
+            {
+                button.Checked =
+                    button.Tag is CapturePreset item &&
+                    item.Id == preset.Id;
+            }
+
+            bool selectedMorePreset =
+                _settings.Presets
+                    .Skip(QuickPresetCount)
+                    .Any(item => item.Id == preset.Id);
+            _morePresetsDropDownButton.Text = selectedMorePreset
+                ? $"{preset.Name} ▼"
+                : "その他 ▼";
+            SetMorePresetsDropDownSelected(selectedMorePreset);
+        }
+        finally
+        {
+            _isUpdatingPresetControls = false;
         }
     }
 
@@ -4960,4 +5150,8 @@ public partial class MainForm : Form
             !FlipVertical &&
             !SimpleNbi;
     }
+
+    private sealed record PlaybackPresetMatch(
+        CapturePreset? Preset,
+        string Source);
 }

@@ -1044,10 +1044,7 @@ public partial class MainForm : Form
             RefreshPresetControls();
             await RefreshDevicesAsync();
 
-            CapturePreset? selectedPreset =
-                _settings.Presets.FirstOrDefault(
-                    preset => preset.Id == _settings.SelectedPresetId)
-                ?? _settings.Presets.FirstOrDefault();
+            CapturePreset? selectedPreset = _settings.Presets.FirstOrDefault();
 
             if (selectedPreset is not null)
             {
@@ -4788,10 +4785,7 @@ public partial class MainForm : Form
             await _settingsStore.SaveAsync(_settings);
             RefreshExaminationTypes();
             RefreshPresetControls();
-            CapturePreset? selectedPreset =
-                _settings.Presets.FirstOrDefault(
-                    preset => preset.Id == _settings.SelectedPresetId)
-                ?? _settings.Presets.FirstOrDefault();
+            CapturePreset? selectedPreset = _settings.Presets.FirstOrDefault();
 
             if (selectedPreset is not null)
             {

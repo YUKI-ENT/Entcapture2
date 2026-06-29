@@ -97,10 +97,25 @@ internal sealed class RsBaseFilingService
         string patientId,
         CancellationToken cancellationToken = default)
     {
+        ENTcapture2.Core.Services.DebugLogger.Info(
+            "RsBaseFilingService.NotifyRsBaseAsync: Starting RSBase notification" +
+            Environment.NewLine +
+            $"  reloadUrl={settings.RsBaseReloadUrl}" +
+            Environment.NewLine +
+            $"  openPatientPage={settings.OpenRsBasePatientPageAfterFiling}" +
+            Environment.NewLine +
+            $"  patientId={patientId}");
         if (!string.IsNullOrWhiteSpace(settings.RsBaseReloadUrl))
         {
             await CallReloadUrlAsync(settings, cancellationToken);
             OpenPatientPageIfNeeded(settings, patientId);
+            ENTcapture2.Core.Services.DebugLogger.Info(
+                "RsBaseFilingService.NotifyRsBaseAsync: RSBase notification completed.");
+        }
+        else
+        {
+            ENTcapture2.Core.Services.DebugLogger.Info(
+                "RsBaseFilingService.NotifyRsBaseAsync: Reload URL is empty. Skipping notification.");
         }
     }
 
@@ -273,10 +288,15 @@ internal sealed class RsBaseFilingService
             return;
         }
 
+        ENTcapture2.Core.Services.DebugLogger.Info(
+            $"RsBaseFilingService.CallReloadUrlAsync: GET {settings.RsBaseReloadUrl}");
         using HttpResponseMessage response = await HttpClient.GetAsync(
             settings.RsBaseReloadUrl,
             cancellationToken);
         response.EnsureSuccessStatusCode();
+        ENTcapture2.Core.Services.DebugLogger.Info(
+            "RsBaseFilingService.CallReloadUrlAsync: Reload URL completed. " +
+            $"StatusCode={(int)response.StatusCode}");
     }
 
     private static void OpenPatientPageIfNeeded(
@@ -286,10 +306,18 @@ internal sealed class RsBaseFilingService
         if (!settings.OpenRsBasePatientPageAfterFiling ||
             string.IsNullOrWhiteSpace(patientId))
         {
+            ENTcapture2.Core.Services.DebugLogger.Info(
+                "RsBaseFilingService.OpenPatientPageIfNeeded: Skipping patient page." +
+                Environment.NewLine +
+                $"  openPatientPage={settings.OpenRsBasePatientPageAfterFiling}" +
+                Environment.NewLine +
+                $"  patientIdIsEmpty={string.IsNullOrWhiteSpace(patientId)}");
             return;
         }
 
         string url = BuildPatientPageUrl(settings, patientId.Trim());
+        ENTcapture2.Core.Services.DebugLogger.Info(
+            $"RsBaseFilingService.OpenPatientPageIfNeeded: Opening patient page {url}");
         Process.Start(new ProcessStartInfo(url)
         {
             UseShellExecute = true

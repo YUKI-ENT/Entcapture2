@@ -6,9 +6,13 @@ public sealed record CameraDeviceInfo(
     int Index,
     string Name,
     string MonikerString,
-    IReadOnlyList<CaptureResolution> Resolutions)
+    IReadOnlyList<CaptureResolution> Resolutions,
+    bool IsMissing = false)
 {
     public string DeviceId => MonikerString;
 
-    public override string ToString() => Name;
+    public string DisplayName => IsMissing ? $"{Name} (デバイスなし)" : Name;
+
+    public override string ToString() =>
+        DisplayName;
 }

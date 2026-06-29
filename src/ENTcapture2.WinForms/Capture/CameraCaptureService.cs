@@ -10,6 +10,7 @@ public sealed class CameraCaptureService : IAsyncDisposable
 {
     private const int RecordingQueueCapacity = 600;
     private const int MaximumBestSnapshotWindowMilliseconds = 1000;
+    private const int NoInputFrameFaultThresholdSeconds = 30;
 
     private readonly object _imageLock = new();
     private readonly object _optionsLock = new();
@@ -59,6 +60,8 @@ public sealed class CameraCaptureService : IAsyncDisposable
 
     public async Task StartAsync(
         int deviceIndex,
+        string deviceId,
+        string deviceName,
         int width,
         int height,
         int framesPerSecond,
@@ -69,6 +72,7 @@ public sealed class CameraCaptureService : IAsyncDisposable
     {
         ENTcapture2.Core.Services.DebugLogger.Debug(
             $"CameraCaptureService.StartAsync: deviceIndex={deviceIndex}, " +
+            $"deviceName={deviceName}, deviceId={deviceId}, " +
             $"resolution={width}x{height}@{framesPerSecond}fps, " +
             $"pixelFormat={pixelFormat}, recording={recordingOptions is not null}");
 
@@ -114,14 +118,31 @@ public sealed class CameraCaptureService : IAsyncDisposable
 
             _cancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             CancellationToken token = _cancellation.Token;
+            ENTcapture2.Core.Services.DebugLogger.Info(
+                "CameraCaptureService.StartAsync: DirectShow devices visible to UsbCamera" +
+                Environment.NewLine +
+                UsbCamera.DescribeDevices());
             UsbCamera.VideoFormat format =
                 SelectUsbCameraFormat(
                     deviceIndex,
+                    deviceId,
                     width,
                     height,
                     framesPerSecond,
                     pixelFormat);
-            _usbCamera = new UsbCamera(deviceIndex, format);
+            ENTcapture2.Core.Services.DebugLogger.Info(
+                "CameraCaptureService.StartAsync: Opening camera by moniker" +
+                Environment.NewLine +
+                $"  requestedIndex={deviceIndex}" +
+                Environment.NewLine +
+                $"  requestedName={deviceName}" +
+                Environment.NewLine +
+                $"  requestedMoniker={deviceId}" +
+                Environment.NewLine +
+                $"  selectedFormat={DescribeFormat(format)}");
+            _usbCamera = string.IsNullOrWhiteSpace(deviceId)
+                ? new UsbCamera(deviceIndex, format)
+                : new UsbCamera(deviceId, format);
             ENTcapture2.Core.Services.DebugLogger.Info($"CameraCaptureService: Device initialized, starting capture");
             _usbCamera.PreviewCaptured = UsbCamera_PreviewCaptured;
             _usbCamera.Start();
@@ -196,12 +217,16 @@ public sealed class CameraCaptureService : IAsyncDisposable
 
     private static UsbCamera.VideoFormat SelectUsbCameraFormat(
         int deviceIndex,
+        string deviceId,
         int width,
         int height,
         int framesPerSecond,
         string pixelFormat)
     {
-        UsbCamera.VideoFormat[] formats = UsbCamera.GetVideoFormat(deviceIndex);
+        UsbCamera.VideoFormat[] formats =
+            string.IsNullOrWhiteSpace(deviceId)
+                ? UsbCamera.GetVideoFormat(deviceIndex)
+                : UsbCamera.GetVideoFormat(deviceId);
         if (formats.Length == 0)
         {
             return UsbCamera.VideoFormat.Default;
@@ -226,6 +251,18 @@ public sealed class CameraCaptureService : IAsyncDisposable
             .ThenBy(format => GetPixelFormatPriority(format.SubType))
             .FirstOrDefault()
             ?? formats[0];
+    }
+
+    private static string DescribeFormat(UsbCamera.VideoFormat format)
+    {
+        if (format == UsbCamera.VideoFormat.Default)
+        {
+            return "Default";
+        }
+
+        return $"{format.Size.Width}x{format.Size.Height}, " +
+            $"fps={GetFramesPerSecond(format):0.###}, " +
+            $"subType={format.SubType}, timePerFrame={format.TimePerFrame}";
     }
 
     private static double GetFramesPerSecond(UsbCamera.VideoFormat format)
@@ -691,11 +728,13 @@ public sealed class CameraCaptureService : IAsyncDisposable
                 ENTcapture2.Core.Services.DebugLogger.Warning(
                     "CameraCaptureService: No input frames received. " +
                     $"StagnantSeconds={stagnantInputSeconds}, " +
+                    $"ThresholdSeconds={NoInputFrameFaultThresholdSeconds}, " +
                     $"Received={receivedCount}, Displayed={displayedCount}");
-                if (stagnantInputSeconds >= 3)
+                if (stagnantInputSeconds >= NoInputFrameFaultThresholdSeconds)
                 {
                     var exception = new IOException(
-                        "No input frames were received from the camera for 3 seconds.");
+                        "No input frames were received from the camera for " +
+                        $"{NoInputFrameFaultThresholdSeconds} seconds.");
                     ReportCaptureFault(exception);
                     return;
                 }

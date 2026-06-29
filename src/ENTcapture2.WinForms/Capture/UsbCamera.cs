@@ -215,6 +215,33 @@ namespace GitHub.secile.Video
             }
         }
 
+        public static VideoFormat[] GetVideoFormat(string deviceMoniker)
+        {
+            var filter = DirectShow.CreateFilter(
+                DirectShow.DsGuid.CLSID_VideoInputDeviceCategory,
+                deviceMoniker);
+            var pin = DirectShow.FindPin(filter, 0, DirectShow.PIN_DIRECTION.PINDIR_OUTPUT);
+
+            try
+            {
+                return GetVideoOutputFormat(pin);
+            }
+            catch (Exception)
+            {
+                return new[] { VideoFormat.Default };
+            }
+        }
+
+        public static string DescribeDevices()
+        {
+            return string.Join(
+                Environment.NewLine,
+                DirectShow.GetFilterInfos(
+                    DirectShow.DsGuid.CLSID_VideoInputDeviceCategory)
+                    .Select(item =>
+                        $"[{item.Index}] {item.Name}{Environment.NewLine}  Moniker: {item.MonikerString}"));
+        }
+
         /// <summary>
         /// Create USB Camera. If device do not support the size, default size will applied.
         /// </summary>
@@ -244,6 +271,16 @@ namespace GitHub.secile.Video
             Init(cameraIndex, format);
         }
 
+        public UsbCamera(string deviceMoniker, VideoFormat format)
+        {
+            if (string.IsNullOrWhiteSpace(deviceMoniker))
+            {
+                throw new ArgumentException("USB camera moniker is not available.", nameof(deviceMoniker));
+            }
+
+            Init(deviceMoniker, format);
+        }
+
         private void Init(int index, VideoFormat format)
         {
             //----------------------------------
@@ -258,6 +295,31 @@ namespace GitHub.secile.Video
             // VideoCaptureSource
             //----------------------------------
             var vcap_source = CreateVideoCaptureSource(index, format);
+            InitGraph(graph, builder, vcap_source);
+        }
+
+        private void Init(string deviceMoniker, VideoFormat format)
+        {
+            //----------------------------------
+            // Create Filter Graph
+            //----------------------------------
+
+            var graph = DirectShow.CreateGraph();
+            var builder = DirectShow.CoCreateInstance(DirectShow.DsGuid.CLSID_CaptureGraphBuilder2) as DirectShow.ICaptureGraphBuilder2;
+            builder.SetFiltergraph(graph);
+
+            //----------------------------------
+            // VideoCaptureSource
+            //----------------------------------
+            var vcap_source = CreateVideoCaptureSource(deviceMoniker, format);
+            InitGraph(graph, builder, vcap_source);
+        }
+
+        private void InitGraph(
+            DirectShow.IGraphBuilder graph,
+            DirectShow.ICaptureGraphBuilder2 builder,
+            DirectShow.IBaseFilter vcap_source)
+        {
             graph.AddFilter(vcap_source, "VideoCapture");
 
             // PIN_CATEGORY_CAPTURE
@@ -937,6 +999,21 @@ namespace GitHub.secile.Video
             return filter;
         }
 
+        private DirectShow.IBaseFilter CreateVideoCaptureSource(string deviceMoniker, VideoFormat format)
+        {
+            var filter = DirectShow.CreateFilter(
+                DirectShow.DsGuid.CLSID_VideoInputDeviceCategory,
+                deviceMoniker);
+            var pin = DirectShow.FindPin(filter, 0, DirectShow.PIN_DIRECTION.PINDIR_OUTPUT);
+
+            if (format != VideoFormat.Default)
+            {
+                SetVideoOutputFormat(pin, format);
+            }
+
+            return filter;
+        }
+
         /// <summary>
         /// ビデオキャプチャデバイスの出力形式を選択する。
         /// </summary>
@@ -1218,6 +1295,15 @@ namespace GitHub.secile.Video
 
     static class DirectShow
     {
+        public sealed class FilterInfo
+        {
+            public int Index { get; set; }
+
+            public string Name { get; set; }
+
+            public string MonikerString { get; set; }
+        }
+
 #region Function
 
         /// <summary>COMオブジェクトのインスタンスを作成する。</summary>
@@ -1275,6 +1361,31 @@ namespace GitHub.secile.Video
             return result;
         }
 
+        public static List<FilterInfo> GetFilterInfos(Guid category)
+        {
+            var result = new List<FilterInfo>();
+            int index = 0;
+
+            EnumMonikers(category, (moniker, prop) =>
+            {
+                object value = null;
+                prop.Read("FriendlyName", ref value, 0);
+                var name = (string)value;
+
+                result.Add(
+                    new FilterInfo
+                    {
+                        Index = index++,
+                        Name = name,
+                        MonikerString = GetMonikerDisplayName(moniker)
+                    });
+
+                return false;
+            });
+
+            return result;
+        }
+
         /// <summary>フィルタのインスタンスを作成する。CLSIDで指定する。</summary>
         public static IBaseFilter CreateFilter(Guid clsid)
         {
@@ -1308,6 +1419,37 @@ namespace GitHub.secile.Video
 
         /// <summary>モニカを列挙する。</summary>
         /// <remarks>モニカとはCOMオブジェクトを識別する別名のこと。</remarks>
+        public static IBaseFilter CreateFilter(Guid category, string monikerString)
+        {
+            IBaseFilter result = null;
+
+            EnumMonikers(category, (moniker, prop) =>
+            {
+                if (!string.Equals(
+                        GetMonikerDisplayName(moniker),
+                        monikerString,
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    return false;
+                }
+
+                object value = null;
+                Guid guid = DirectShow.DsGuid.IID_IBaseFilter;
+                moniker.BindToObject(null, null, ref guid, out value);
+                result = value as IBaseFilter;
+                return true;
+            });
+
+            if (result == null) throw new ArgumentException("can't create filter.");
+            return result;
+        }
+
+        private static string GetMonikerDisplayName(IMoniker moniker)
+        {
+            moniker.GetDisplayName(null, null, out string displayName);
+            return displayName ?? string.Empty;
+        }
+
         private static void EnumMonikers(Guid category, Func<IMoniker, IPropertyBag, bool> func)
         {
             IEnumMoniker enumerator = null;

@@ -82,7 +82,7 @@ public partial class SettingsForm : Form
             "ドキュメントフォルダーの entcapture2.config を既定にして読み書きします。";
         _importLegacyButton.Text = "V1設定をインポート";
         _presetList.DisplayMember = nameof(CapturePreset.Name);
-        _deviceComboBox.DisplayMember = nameof(CameraDeviceInfo.Name);
+        _deviceComboBox.DisplayMember = nameof(CameraDeviceInfo.DisplayName);
         _deviceComboBox.Items.AddRange(_devices.Cast<object>().ToArray());
         _temporaryCodecComboBox.Items.Clear();
         _temporaryCodecComboBox.Items.AddRange(
@@ -460,7 +460,9 @@ public partial class SettingsForm : Form
             ApplyPresetOptionRules(null);
             _fpsInput.Value = Math.Clamp(preset.FramesPerSecond, 0, 240);
 
-            CameraDeviceInfo? device = FindDevice(preset);
+            CameraDeviceInfo? device =
+                FindDevice(preset) ?? CreateMissingDeviceInfo(preset);
+            EnsureDeviceItem(device);
             _deviceComboBox.SelectedItem = device;
             LoadResolutions(device, preset.Resolution);
 
@@ -522,7 +524,7 @@ public partial class SettingsForm : Form
         preset.FramesPerSecond = decimal.ToInt32(_fpsInput.Value);
         preset.FontName = _fontComboBox.Text.Trim();
 
-        if (_deviceComboBox.SelectedItem is CameraDeviceInfo device)
+        if (_deviceComboBox.SelectedItem is CameraDeviceInfo { IsMissing: false } device)
         {
             preset.DeviceId = device.MonikerString;
             preset.DeviceName = device.Name;
@@ -606,7 +608,7 @@ public partial class SettingsForm : Form
         try
         {
             _resolutionComboBox.Items.Clear();
-            if (device is null)
+            if (device is null || device.IsMissing)
             {
                 if (selectedResolution is not null)
                 {
@@ -684,11 +686,41 @@ public partial class SettingsForm : Form
                         preset.DeviceId,
                         StringComparison.OrdinalIgnoreCase))
             ?? _devices.FirstOrDefault(
-                item => string.Equals(
+                item =>
+                    string.IsNullOrWhiteSpace(preset.DeviceId) &&
+                    string.Equals(
                     item.Name,
                     preset.DeviceName,
-                    StringComparison.OrdinalIgnoreCase))
-            ?? _devices.FirstOrDefault(item => item.Index == preset.DeviceIndex);
+                    StringComparison.OrdinalIgnoreCase));
+    }
+
+    private void EnsureDeviceItem(CameraDeviceInfo? device)
+    {
+        if (device is null || _deviceComboBox.Items.Contains(device))
+        {
+            return;
+        }
+
+        _deviceComboBox.Items.Add(device);
+    }
+
+    private static CameraDeviceInfo? CreateMissingDeviceInfo(CapturePreset preset)
+    {
+        if (string.IsNullOrWhiteSpace(preset.DeviceId) &&
+            string.IsNullOrWhiteSpace(preset.DeviceName))
+        {
+            return null;
+        }
+
+        string name = string.IsNullOrWhiteSpace(preset.DeviceName)
+            ? preset.DeviceId
+            : preset.DeviceName;
+        return new CameraDeviceInfo(
+            preset.DeviceIndex,
+            name,
+            preset.DeviceId,
+            [],
+            true);
     }
 
     private void BrowseDirectoryButton_Click(object? sender, EventArgs e)

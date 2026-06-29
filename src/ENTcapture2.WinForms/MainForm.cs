@@ -319,7 +319,7 @@ public partial class MainForm : Form
             Theme.Accent);
         ConfigureModernButton(
             _savePresetButton,
-            "現在値をプリセットへ保存",
+            "現在の補正をプリセットへ保存",
             Theme.SurfaceRaised);
         ConfigureModernButton(
             _playPauseButton,
@@ -922,7 +922,7 @@ public partial class MainForm : Form
         _snapshotButton.Dock = DockStyle.Fill;
         _snapshotButton.Enabled = false;
 
-        ConfigureButton(_savePresetButton, "現在値をプリセットへ保存", Theme.SurfaceRaised);
+        ConfigureButton(_savePresetButton, "現在の補正をプリセットへ保存", Theme.SurfaceRaised);
         _savePresetButton.Dock = DockStyle.Fill;
 
         content.Controls.Add(_snapshotButton);
@@ -1044,7 +1044,10 @@ public partial class MainForm : Form
             RefreshPresetControls();
             await RefreshDevicesAsync();
 
-            CapturePreset? selectedPreset = _settings.Presets.FirstOrDefault();
+            CapturePreset? selectedPreset =
+                _settings.Presets.FirstOrDefault(
+                    preset => preset.Id == _settings.SelectedPresetId)
+                ?? _settings.Presets.FirstOrDefault();
 
             if (selectedPreset is not null)
             {
@@ -1071,7 +1074,10 @@ public partial class MainForm : Form
             ENTcapture2.Core.Services.DebugLogger.Debug("RefreshDevicesAsync: Starting device discovery");
             IReadOnlyList<CameraDeviceInfo> devices =
                 await DirectShowDeviceCatalog.DiscoverAsync();
-            ENTcapture2.Core.Services.DebugLogger.Info($"RefreshDevicesAsync: Found {devices.Count} device(s)");
+            ENTcapture2.Core.Services.DebugLogger.Info(
+                $"RefreshDevicesAsync: Found {devices.Count} device(s)" +
+                Environment.NewLine +
+                DirectShowDeviceCatalog.Describe(devices));
 
             _deviceComboBox.BeginUpdate();
             _deviceComboBox.Items.Clear();
@@ -1081,18 +1087,25 @@ public partial class MainForm : Form
             }
             _deviceComboBox.EndUpdate();
 
+            CameraDeviceInfo? missingDevice =
+                CreateMissingDeviceInfo(_selectedPreset);
+            CameraDeviceInfo? preferred = FindConnectedDevice(_selectedPreset);
+            if (preferred is null && missingDevice is not null)
+            {
+                _deviceComboBox.Items.Add(missingDevice);
+                if (devices.Count == 0)
+                {
+                    _deviceComboBox.SelectedItem = missingDevice;
+                }
+            }
+
             if (devices.Count > 0)
             {
-                CameraDeviceInfo? preferred = devices.FirstOrDefault(
-                    device =>
-                        !string.IsNullOrWhiteSpace(_selectedPreset?.DeviceId) &&
-                        string.Equals(
-                            device.MonikerString,
-                            _selectedPreset.DeviceId,
-                            StringComparison.OrdinalIgnoreCase))
-                    ?? devices.FirstOrDefault(
-                        device => device.Index == _selectedPreset?.DeviceIndex);
                 _deviceComboBox.SelectedItem = preferred ?? devices[0];
+                if (preferred is null && missingDevice is not null)
+                {
+                    _deviceComboBox.SelectedItem = missingDevice;
+                }
                 _statusLabel.Text = $"●  {devices.Count}台のカメラを検出";
                 _statusLabel.ForeColor = Theme.AccentBright;
             }
@@ -1120,6 +1133,26 @@ public partial class MainForm : Form
     {
         if (_deviceComboBox.SelectedItem is not CameraDeviceInfo device)
         {
+            return;
+        }
+
+        if (device.IsMissing)
+        {
+            _resolutionComboBox.BeginUpdate();
+            try
+            {
+                _resolutionComboBox.Items.Clear();
+                if (_selectedPreset?.Resolution is not null)
+                {
+                    _resolutionComboBox.Items.Add(_selectedPreset.Resolution);
+                    _resolutionComboBox.SelectedIndex = 0;
+                }
+            }
+            finally
+            {
+                _resolutionComboBox.EndUpdate();
+            }
+
             return;
         }
 
@@ -1241,6 +1274,25 @@ public partial class MainForm : Form
             return;
         }
 
+        if (device.IsMissing)
+        {
+            ENTcapture2.Core.Services.DebugLogger.Warning(
+                "StartButton_Click: Selected preset device is not connected" +
+                Environment.NewLine +
+                $"  preset={_selectedPreset?.Name}" +
+                Environment.NewLine +
+                $"  savedDeviceName={_selectedPreset?.DeviceName}" +
+                Environment.NewLine +
+                $"  savedDeviceId={_selectedPreset?.DeviceId}");
+            MessageBox.Show(
+                this,
+                "選択中のプリセットのデバイスが接続されていません。",
+                "ENTcapture2",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning);
+            return;
+        }
+
         CaptureResolution resolution =
             _resolutionComboBox.SelectedItem as CaptureResolution
             ?? CaptureResolution.Default;
@@ -1308,6 +1360,8 @@ public partial class MainForm : Form
 
             await _cameraService.StartAsync(
                 device.Index,
+                device.MonikerString,
+                device.Name,
                 resolution.Width,
                 resolution.Height,
                 resolution.FramesPerSecond,
@@ -1514,18 +1568,65 @@ public partial class MainForm : Form
     {
         bool fileVideo = _fileVideoCheckBox.Checked;
         bool notifyRsBase = _settings.AutoFileToRsBase;
+        bool outputDirectoryHasMediaFiles = OutputDirectoryHasMediaFiles();
+        ENTcapture2.Core.Services.DebugLogger.Info(
+            "RunRsBaseAutoFilingAsync: Evaluating RSBase auto filing" +
+            Environment.NewLine +
+            $"  fileVideo={fileVideo}" +
+            Environment.NewLine +
+            $"  notifyRsBase={notifyRsBase}" +
+            Environment.NewLine +
+            $"  previewOnly={_previewOnlyCheckBox.Checked}" +
+            Environment.NewLine +
+            $"  recordingPaths={recordingPaths.Count}" +
+            Environment.NewLine +
+            $"  outputDirectory={_settings.SnapshotDirectory}" +
+            Environment.NewLine +
+            $"  outputDirectoryHasMediaFiles={outputDirectoryHasMediaFiles}");
         if (!fileVideo && !notifyRsBase)
         {
+            ENTcapture2.Core.Services.DebugLogger.Info(
+                "RunRsBaseAutoFilingAsync: Video filing and RSBase notification are disabled.");
             return;
         }
 
-        if (notifyRsBase &&
-            !fileVideo &&
-            !OutputDirectoryHasMediaFiles())
+        if (notifyRsBase && !fileVideo)
         {
-            ENTcapture2.Core.Services.DebugLogger.Info(
-                "RunRsBaseAutoFilingAsync: Output directory has no media files. " +
-                "Skipping RSBase reload and patient page.");
+            if (!outputDirectoryHasMediaFiles)
+            {
+                ENTcapture2.Core.Services.DebugLogger.Info(
+                    "RunRsBaseAutoFilingAsync: Output directory has no media files. " +
+                    "Skipping RSBase reload and patient page.");
+                return;
+            }
+
+            try
+            {
+                ENTcapture2.Core.Services.DebugLogger.Info(
+                    "RunRsBaseAutoFilingAsync: Notifying RSBase for existing snapshot/media files.");
+                await _rsBaseFilingService.NotifyRsBaseAsync(
+                    _settings,
+                    _patientIdTextBox.Text.Trim());
+                _statusLabel.Text = "●  RSBase取込を通知しました";
+                _statusLabel.ForeColor = Theme.AccentBright;
+                ENTcapture2.Core.Services.DebugLogger.Info(
+                    "RunRsBaseAutoFilingAsync: RSBase notification completed for existing snapshot/media files.");
+            }
+            catch (Exception exception)
+            {
+                ENTcapture2.Core.Services.DebugLogger.Error(
+                    "RunRsBaseAutoFilingAsync: RSBase notification failed for existing snapshot/media files.",
+                    exception);
+                MessageBox.Show(
+                    this,
+                    $"RSBase自動ファイリングに失敗しました。\r\n{exception.Message}",
+                    "ENTcapture2",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+                _statusLabel.Text = "●  RSBase自動ファイリング失敗";
+                _statusLabel.ForeColor = Theme.Danger;
+            }
+
             return;
         }
 
@@ -2051,7 +2152,6 @@ public partial class MainForm : Form
         try
         {
             ApplyHeaderOptionRules(sender);
-            ApplyHeaderOptionsToSelectedPreset();
         }
         finally
         {
@@ -2059,18 +2159,6 @@ public partial class MainForm : Form
         }
 
         UpdateCaptureModePresentation();
-    }
-
-    private void ApplyHeaderOptionsToSelectedPreset()
-    {
-        if (_selectedPreset is null)
-        {
-            return;
-        }
-
-        _selectedPreset.IsVideo = _fileVideoCheckBox.Checked;
-        _selectedPreset.PreviewOnly = _previewOnlyCheckBox.Checked &&
-            !_selectedPreset.IsVideo;
     }
 
     private void StartExternalIntegrations()
@@ -2253,7 +2341,7 @@ public partial class MainForm : Form
                 ?? string.Empty;
             _patientIdTextBox.Text = parsed.PatientId;
             _patientNameTextBox.Text = patientName;
-            _examinationTypeComboBox.Text = parsed.ExaminationName;
+            SetExaminationTypeTextWithoutPresetUpdate(parsed.ExaminationName);
             _playbackCapturePreset =
                 CreatePlaybackFallbackPreset(parsed.ExaminationName);
             _playbackCapturedAt = parsed.CapturedAt;
@@ -2333,7 +2421,7 @@ public partial class MainForm : Form
 
         if (!string.IsNullOrWhiteSpace(metadata.ExaminationName))
         {
-            _examinationTypeComboBox.Text = metadata.ExaminationName;
+            SetExaminationTypeTextWithoutPresetUpdate(metadata.ExaminationName);
         }
 
         // Update preset button UI to reflect the loaded preset.
@@ -2487,20 +2575,29 @@ public partial class MainForm : Form
             _examinationTypeComboBox.EndUpdate();
         }
 
-        _examinationTypeComboBox.Text = selected;
+        SetExaminationTypeTextWithoutPresetUpdate(selected);
+    }
+
+    private void SetExaminationTypeTextWithoutPresetUpdate(string text)
+    {
+        bool wasUpdating = _isUpdatingPresetControls;
+        _isUpdatingPresetControls = true;
+        try
+        {
+            _examinationTypeComboBox.Text = text;
+        }
+        finally
+        {
+            _isUpdatingPresetControls = wasUpdating;
+        }
     }
 
     private void ExaminationTypeComboBox_TextChanged(
         object? sender,
         EventArgs e)
     {
-        if (_isUpdatingPresetControls || _selectedPreset is null)
-        {
-            return;
-        }
-
-        _selectedPreset.ExaminationType =
-            _examinationTypeComboBox.Text.Trim();
+        // Main-form examination changes are session-only. Persist preset values
+        // from the settings dialog so playback metadata cannot rewrite presets.
     }
 
     private async Task ClosePlaybackAsync()
@@ -4181,27 +4278,10 @@ public partial class MainForm : Form
             return;
         }
 
-        if (_deviceComboBox.SelectedItem is CameraDeviceInfo device)
-        {
-            _selectedPreset.DeviceIndex = device.Index;
-            _selectedPreset.DeviceId = device.DeviceId;
-            _selectedPreset.DeviceName = device.Name;
-        }
-
-        CaptureResolution resolution =
-            _resolutionComboBox.SelectedItem as CaptureResolution
-            ?? CaptureResolution.Default;
-        _selectedPreset.Resolution = resolution;
-        _selectedPreset.FramesPerSecond = resolution.FramesPerSecond;
         _selectedPreset.WhiteBalanceRed = _redTrack.Value;
         _selectedPreset.WhiteBalanceGreen = _greenTrack.Value;
         _selectedPreset.WhiteBalanceBlue = _blueTrack.Value;
         _selectedPreset.Gamma = _gammaTrack.Value / 10.0;
-        _selectedPreset.ExaminationType =
-            _examinationTypeComboBox.Text.Trim();
-        _selectedPreset.IsVideo = _fileVideoCheckBox.Checked;
-        _selectedPreset.PreviewOnly = _previewOnlyCheckBox.Checked &&
-            !_selectedPreset.IsVideo;
         _selectedPreset.FlipHorizontal =
             _flipHorizontalCheckBox.Checked;
         _selectedPreset.FlipVertical =
@@ -4351,26 +4431,29 @@ public partial class MainForm : Form
             _previewOnlyCheckBox.Checked = preset.PreviewOnly;
             ApplyHeaderOptionRules(null);
 
-            CameraDeviceInfo? device = _deviceComboBox.Items
-                .Cast<CameraDeviceInfo>()
-                .FirstOrDefault(
-                    item =>
-                        !string.IsNullOrWhiteSpace(preset.DeviceId) &&
-                        string.Equals(
-                            item.MonikerString,
-                            preset.DeviceId,
-                            StringComparison.OrdinalIgnoreCase))
-                ?? _deviceComboBox.Items
-                    .Cast<CameraDeviceInfo>()
-                    .FirstOrDefault(item => item.Index == preset.DeviceIndex);
+            CameraDeviceInfo? device = FindConnectedDevice(preset);
+            if (device is null)
+            {
+                device = CreateMissingDeviceInfo(preset);
+                EnsureDeviceItem(device);
+            }
+
             if (device is not null)
             {
                 _deviceComboBox.SelectedItem = device;
             }
+            else
+            {
+                _deviceComboBox.SelectedIndex = -1;
+                _resolutionComboBox.Items.Clear();
+            }
 
             int resolutionIndex = _resolutionComboBox.Items.IndexOf(preset.Resolution);
-            _resolutionComboBox.SelectedIndex =
-                resolutionIndex >= 0 ? resolutionIndex : 0;
+            if (_resolutionComboBox.Items.Count > 0)
+            {
+                _resolutionComboBox.SelectedIndex =
+                    resolutionIndex >= 0 ? resolutionIndex : 0;
+            }
 
             SetTrackBarValue(_redTrack, preset.WhiteBalanceRed);
             SetTrackBarValue(_greenTrack, preset.WhiteBalanceGreen);
@@ -4414,6 +4497,87 @@ public partial class MainForm : Form
             ProcessingControlChanged();
             UpdateInteractionGuards();
         }
+    }
+
+    private CameraDeviceInfo? FindConnectedDevice(CapturePreset? preset)
+    {
+        if (preset is null)
+        {
+            return null;
+        }
+
+        CameraDeviceInfo? device = _deviceComboBox.Items
+            .Cast<CameraDeviceInfo>()
+            .FirstOrDefault(
+                item =>
+                    !item.IsMissing &&
+                    !string.IsNullOrWhiteSpace(preset.DeviceId) &&
+                    string.Equals(
+                        item.MonikerString,
+                        preset.DeviceId,
+                        StringComparison.OrdinalIgnoreCase));
+        if (device is not null)
+        {
+            return device;
+        }
+
+        if (string.IsNullOrWhiteSpace(preset.DeviceId))
+        {
+            return _deviceComboBox.Items
+                .Cast<CameraDeviceInfo>()
+                .FirstOrDefault(
+                    item =>
+                        !item.IsMissing &&
+                        string.Equals(
+                            item.Name,
+                            preset.DeviceName,
+                            StringComparison.OrdinalIgnoreCase));
+        }
+
+        return null;
+    }
+
+    private void EnsureDeviceItem(CameraDeviceInfo? device)
+    {
+        if (device is null ||
+            _deviceComboBox.Items
+                .Cast<CameraDeviceInfo>()
+                .Any(
+                    item =>
+                        item.IsMissing == device.IsMissing &&
+                        string.Equals(
+                            item.MonikerString,
+                            device.MonikerString,
+                            StringComparison.OrdinalIgnoreCase) &&
+                        string.Equals(
+                            item.Name,
+                            device.Name,
+                            StringComparison.OrdinalIgnoreCase)))
+        {
+            return;
+        }
+
+        _deviceComboBox.Items.Add(device);
+    }
+
+    private static CameraDeviceInfo? CreateMissingDeviceInfo(CapturePreset? preset)
+    {
+        if (preset is null ||
+            (string.IsNullOrWhiteSpace(preset.DeviceId) &&
+             string.IsNullOrWhiteSpace(preset.DeviceName)))
+        {
+            return null;
+        }
+
+        string name = string.IsNullOrWhiteSpace(preset.DeviceName)
+            ? preset.DeviceId
+            : preset.DeviceName;
+        return new CameraDeviceInfo(
+            preset.DeviceIndex,
+            name,
+            preset.DeviceId,
+            [],
+            true);
     }
 
     private async void ManagePresetsButton_Click(object? sender, EventArgs e)

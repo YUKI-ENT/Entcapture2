@@ -75,7 +75,7 @@ public static class LegacySettingsImporter
         settings.FinalVideoCodec = Get(values, "recodec");
         if (string.IsNullOrWhiteSpace(settings.FinalVideoCodec))
         {
-            settings.FinalVideoCodec = "libx264";
+            settings.FinalVideoCodec = "AUTO";
         }
         settings.FinalVideoBitrateKbps =
             Math.Max(500, GetInt(values, "rebitrate", 4000));

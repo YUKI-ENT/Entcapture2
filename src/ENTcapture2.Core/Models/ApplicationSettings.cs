@@ -39,7 +39,7 @@ public sealed class ApplicationSettings
 
     public int ReencodeThresholdMegabytes { get; set; } = 100;
 
-    public string FinalVideoCodec { get; set; } = "libx264";
+    public string FinalVideoCodec { get; set; } = "AUTO";
 
     public string FinalVideoQuality { get; set; } = "Standard";
 

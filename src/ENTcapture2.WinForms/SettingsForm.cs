@@ -1241,7 +1241,7 @@ public partial class SettingsForm : Form
             decimal.ToInt32(_reencodeThresholdInput.Value);
         Settings.FinalVideoCodec =
             string.IsNullOrWhiteSpace(_finalCodecComboBox.Text)
-                ? "libx264"
+                ? "AUTO"
                 : _finalCodecComboBox.Text.Trim();
         Settings.FinalVideoQuality =
             FromFinalVideoQualityDisplayName(_finalQualityComboBox.Text);
@@ -1339,7 +1339,7 @@ public partial class SettingsForm : Form
             decimal.ToInt32(_reencodeThresholdInput.Value);
         Settings.FinalVideoCodec =
             string.IsNullOrWhiteSpace(_finalCodecComboBox.Text)
-                ? "libx264"
+                ? "AUTO"
                 : _finalCodecComboBox.Text.Trim();
         Settings.FinalVideoQuality =
             FromFinalVideoQualityDisplayName(_finalQualityComboBox.Text);

@@ -30,6 +30,7 @@ internal sealed class ClipEditorForm : Form
     private readonly Label _rangeLabel = new();
     private readonly ListBox _rangeListBox = new();
     private readonly ComboBox _encoderComboBox = new();
+    private readonly ComboBox _deinterlaceComboBox = new();
     private readonly RadioButton _qualityModeRadioButton = new();
     private readonly RadioButton _bitrateModeRadioButton = new();
     private readonly ComboBox _qualityComboBox = new();
@@ -236,7 +237,7 @@ internal sealed class ClipEditorForm : Form
             [
                 new EncoderChoice("コピー（無劣化・高速）", string.Empty, false),
                 new EncoderChoice("H.264 自動", "AUTO", true),
-                new EncoderChoice("H.264 libx264", "libx264", true),
+                new EncoderChoice("H.264 OpenH264", "libopenh264", true),
                 new EncoderChoice("H.264 NVENC", "NVENC", true),
                 new EncoderChoice("H.264 AMF", "AMF", true),
                 new EncoderChoice("H.264 QSV", "QSV", true),
@@ -245,6 +246,20 @@ internal sealed class ClipEditorForm : Form
             ]);
         SelectEncoder(defaultCodec);
         optionGrid.Controls.Add(_encoderComboBox, 1, 1);
+
+        AddLabel(optionGrid, "インタレース解除", 2, 1);
+        _deinterlaceComboBox.DropDownStyle = ComboBoxStyle.DropDownList;
+        _deinterlaceComboBox.BackColor = Theme.SurfaceRaised;
+        _deinterlaceComboBox.ForeColor = Theme.Text;
+        _deinterlaceComboBox.FlatStyle = FlatStyle.Flat;
+        _deinterlaceComboBox.Items.AddRange(
+            [
+                new DeinterlaceChoice("なし", string.Empty),
+                new DeinterlaceChoice("yadif", "yadif=mode=send_frame:parity=auto:deint=interlaced"),
+                new DeinterlaceChoice("bwdif", "bwdif=mode=send_frame:parity=auto:deint=interlaced")
+            ]);
+        _deinterlaceComboBox.SelectedIndex = 0;
+        optionGrid.Controls.Add(_deinterlaceComboBox, 3, 1);
 
         // 行 2: [ビットレート指定] [ビットレートInput + " kbps"] | [圧縮目標] [圧縮率Input + "%"]
         _bitrateModeRadioButton.Text = "ビットレート指定";
@@ -373,6 +388,7 @@ internal sealed class ClipEditorForm : Form
         };
         _playbackTrackBar.Scroll += PlaybackTrackBar_Scroll;
         _encoderComboBox.SelectedIndexChanged += (_, _) => UpdatePresentation();
+        _deinterlaceComboBox.SelectedIndexChanged += (_, _) => UpdatePresentation();
         _qualityModeRadioButton.CheckedChanged += (_, _) => UpdatePresentation();
         _bitrateModeRadioButton.CheckedChanged += (_, _) => UpdatePresentation();
         _qualityComboBox.SelectedIndexChanged += (_, _) => UpdatePresentation();
@@ -733,7 +749,20 @@ internal sealed class ClipEditorForm : Form
                 ? ClipExportRateControl.Bitrate
                 : ClipExportRateControl.Quality,
             decimal.ToInt32(_bitrateInput.Value),
-            FromFinalVideoQualityDisplayName(_qualityComboBox.Text));
+            FromFinalVideoQualityDisplayName(_qualityComboBox.Text),
+            GetSelectedDeinterlaceFilter());
+    }
+
+    private string GetSelectedDeinterlaceFilter()
+    {
+        var choice = (EncoderChoice?)_encoderComboBox.SelectedItem;
+        if (choice?.Reencode != true)
+        {
+            return string.Empty;
+        }
+
+        return (_deinterlaceComboBox.SelectedItem as DeinterlaceChoice)?.Filter
+            ?? string.Empty;
     }
 
     private TimeSpan? GetTrackBarTime()
@@ -809,6 +838,7 @@ internal sealed class ClipEditorForm : Form
 
         var choice = (EncoderChoice?)_encoderComboBox.SelectedItem;
         bool canConfigureReencode = choice?.Reencode == true;
+        _deinterlaceComboBox.Enabled = canConfigureReencode;
         _qualityModeRadioButton.Enabled = canConfigureReencode;
         _bitrateModeRadioButton.Enabled = canConfigureReencode;
         _qualityComboBox.Enabled =
@@ -1111,7 +1141,8 @@ internal sealed class ClipEditorForm : Form
             "h264_amf" => "AMF",
             "h264_qsv" => "QSV",
             "h264_mf" => "h264_mf",
-            "libopenh264" => "AUTO",
+            "libopenh264" => "libopenh264",
+            "libx264" => "AUTO",
             var text => text
         };
     }
@@ -1184,6 +1215,11 @@ internal sealed class ClipEditorForm : Form
         string Text,
         string Value,
         bool Reencode)
+    {
+        public override string ToString() => Text;
+    }
+
+    private sealed record DeinterlaceChoice(string Text, string Filter)
     {
         public override string ToString() => Text;
     }

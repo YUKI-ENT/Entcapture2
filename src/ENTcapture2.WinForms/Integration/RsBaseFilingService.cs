@@ -131,8 +131,19 @@ internal sealed class RsBaseFilingService
             StartInfo = FfmpegRuntime.CreateStartInfo()
         };
         string encoder = string.IsNullOrWhiteSpace(codec)
-            ? "libx264"
+            ? "AUTO"
             : codec.Trim();
+        if (string.Equals(encoder, "libx264", StringComparison.OrdinalIgnoreCase))
+        {
+            encoder = "AUTO";
+        }
+
+        if (string.Equals(encoder, "AUTO", StringComparison.OrdinalIgnoreCase) ||
+            encoder is "NVENC" or "AMF" or "QSV")
+        {
+            encoder = FfmpegRuntime.SelectH264Encoder(encoder).EncoderName;
+        }
+
         FfmpegRuntime.Add(
             process.StartInfo.ArgumentList,
             "-hide_banner",
@@ -170,13 +181,11 @@ internal sealed class RsBaseFilingService
 
         switch (encoder)
         {
-            case "libx264":
+            case "libopenh264":
                 FfmpegRuntime.Add(
                     arguments,
-                    "-preset",
-                    "veryfast",
-                    "-crf",
-                    crf.ToString(),
+                    "-b:v",
+                    maxrate,
                     "-maxrate",
                     maxrate,
                     "-bufsize",

@@ -273,6 +273,11 @@ internal sealed class ClipExportService
         }
 
         FfmpegRuntime.Add(arguments, "-an", "-c:v", encoder);
+        if (!string.IsNullOrWhiteSpace(options.DeinterlaceFilter))
+        {
+            FfmpegRuntime.Add(arguments, "-vf", options.DeinterlaceFilter);
+        }
+
         if (options.RateControl == ClipExportRateControl.Bitrate &&
             options.BitrateKbps > 0)
         {
@@ -369,6 +374,16 @@ internal sealed class ClipExportService
                     arguments,
                     "-quality",
                     Math.Clamp(100 - (crf * 2), 40, 90).ToString(),
+                    "-b:v",
+                    maxrate,
+                    "-maxrate",
+                    maxrate,
+                    "-bufsize",
+                    bufferSize);
+                break;
+            case "libopenh264":
+                FfmpegRuntime.Add(
+                    arguments,
                     "-b:v",
                     maxrate,
                     "-maxrate",
@@ -567,7 +582,8 @@ internal sealed record ClipExportOptions(
     string EncoderName,
     ClipExportRateControl RateControl,
     int BitrateKbps,
-    string Quality)
+    string Quality,
+    string DeinterlaceFilter = "")
 {
     public static ClipExportOptions Copy { get; } =
         new(
@@ -575,5 +591,6 @@ internal sealed record ClipExportOptions(
             string.Empty,
             ClipExportRateControl.Bitrate,
             0,
+            string.Empty,
             string.Empty);
 }

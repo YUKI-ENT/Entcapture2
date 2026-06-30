@@ -154,8 +154,15 @@ public sealed class JsonSettingsStore : ISettingsStore
             Math.Clamp(settings.ReencodeThresholdMegabytes, 0, 1000000);
         settings.FinalVideoCodec =
             string.IsNullOrWhiteSpace(settings.FinalVideoCodec)
-                ? "libx264"
+                ? "AUTO"
                 : settings.FinalVideoCodec.Trim();
+        if (string.Equals(
+                settings.FinalVideoCodec,
+                "libx264",
+                StringComparison.OrdinalIgnoreCase))
+        {
+            settings.FinalVideoCodec = "AUTO";
+        }
         settings.FinalVideoQuality =
             NormalizeFinalVideoQuality(settings.FinalVideoQuality);
         settings.FinalVideoBitrateKbps =

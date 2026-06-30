@@ -673,7 +673,7 @@ public partial class SettingsForm
         // _finalCodecComboBox
         //
         _finalCodecComboBox.DropDownStyle = ComboBoxStyle.DropDownList;
-        _finalCodecComboBox.Items.AddRange(new object[] { "libx264", "h264_mf", "h264_nvenc", "h264_qsv", "h264_amf" });
+        _finalCodecComboBox.Items.AddRange(new object[] { "AUTO", "libopenh264", "h264_mf", "h264_nvenc", "h264_qsv", "h264_amf" });
         _finalCodecComboBox.Location = new Point(153, 71);
         _finalCodecComboBox.Name = "_finalCodecComboBox";
         _finalCodecComboBox.Size = new Size(180, 23);

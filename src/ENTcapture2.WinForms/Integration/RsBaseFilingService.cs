@@ -80,7 +80,10 @@ internal sealed class RsBaseFilingService
         {
             progress?.Report("RSBaseへ取込通知中...");
             await CallReloadUrlAsync(settings, cancellationToken);
-            OpenPatientPageIfNeeded(settings, patientId);
+            await OpenPatientPageIfNeededAsync(
+                settings,
+                patientId,
+                cancellationToken);
         }
         else if (notifyRsBase)
         {
@@ -104,11 +107,18 @@ internal sealed class RsBaseFilingService
             Environment.NewLine +
             $"  openPatientPage={settings.OpenRsBasePatientPageAfterFiling}" +
             Environment.NewLine +
+            $"  patientPageUrlTemplate={settings.RsBasePatientPageUrlTemplate}" +
+            Environment.NewLine +
+            $"  patientPageDelayMs={settings.RsBasePatientPageDelayMilliseconds}" +
+            Environment.NewLine +
             $"  patientId={patientId}");
         if (!string.IsNullOrWhiteSpace(settings.RsBaseReloadUrl))
         {
             await CallReloadUrlAsync(settings, cancellationToken);
-            OpenPatientPageIfNeeded(settings, patientId);
+            await OpenPatientPageIfNeededAsync(
+                settings,
+                patientId,
+                cancellationToken);
             ENTcapture2.Core.Services.DebugLogger.Info(
                 "RsBaseFilingService.NotifyRsBaseAsync: RSBase notification completed.");
         }
@@ -308,9 +318,10 @@ internal sealed class RsBaseFilingService
             $"StatusCode={(int)response.StatusCode}");
     }
 
-    private static void OpenPatientPageIfNeeded(
+    private static async Task OpenPatientPageIfNeededAsync(
         ApplicationSettings settings,
-        string patientId)
+        string patientId,
+        CancellationToken cancellationToken)
     {
         if (!settings.OpenRsBasePatientPageAfterFiling ||
             string.IsNullOrWhiteSpace(patientId))
@@ -324,9 +335,21 @@ internal sealed class RsBaseFilingService
             return;
         }
 
+        int delayMilliseconds = Math.Clamp(
+            settings.RsBasePatientPageDelayMilliseconds,
+            0,
+            60000);
+        if (delayMilliseconds > 0)
+        {
+            ENTcapture2.Core.Services.DebugLogger.Info(
+                "RsBaseFilingService.OpenPatientPageIfNeededAsync: Waiting before opening patient page. " +
+                $"DelayMs={delayMilliseconds}");
+            await Task.Delay(delayMilliseconds, cancellationToken);
+        }
+
         string url = BuildPatientPageUrl(settings, patientId.Trim());
         ENTcapture2.Core.Services.DebugLogger.Info(
-            $"RsBaseFilingService.OpenPatientPageIfNeeded: Opening patient page {url}");
+            $"RsBaseFilingService.OpenPatientPageIfNeededAsync: Opening patient page {url}");
         Process.Start(new ProcessStartInfo(url)
         {
             UseShellExecute = true
@@ -338,6 +361,14 @@ internal sealed class RsBaseFilingService
         string patientId)
     {
         string escapedPatientId = Uri.EscapeDataString(patientId);
+        if (!string.IsNullOrWhiteSpace(settings.RsBasePatientPageUrlTemplate))
+        {
+            string template = settings.RsBasePatientPageUrlTemplate.Trim();
+            return template.Contains("$i", StringComparison.Ordinal)
+                ? template.Replace("$i", escapedPatientId, StringComparison.Ordinal)
+                : template + escapedPatientId;
+        }
+
         if (Uri.TryCreate(
                 settings.RsBaseReloadUrl,
                 UriKind.Absolute,

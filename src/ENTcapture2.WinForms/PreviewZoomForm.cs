@@ -13,7 +13,10 @@ public sealed class PreviewZoomForm : Form
     private readonly PictureBox _pictureBox = new();
     private readonly Label _zoomLabel = new();
     private readonly TableLayoutPanel _playbackPanel = new();
+    private readonly FlowLayoutPanel _playbackButtonPanel = new();
+    private readonly Button _previousFrameButton = new();
     private readonly Button _playPauseButton = new();
+    private readonly Button _nextFrameButton = new();
     private readonly TrackBar _playbackTrackBar = new();
     private Bitmap? _sourceImage;
     private double _zoom = 1.0;
@@ -25,6 +28,7 @@ public sealed class PreviewZoomForm : Form
 
     public event Action<TimeSpan>? PlaybackSeekRequested;
     public event Action? PlaybackToggleRequested;
+    public event Action<int>? PlaybackStepRequested;
 
     public PreviewZoomForm()
     {
@@ -62,16 +66,27 @@ public sealed class PreviewZoomForm : Form
         _playbackPanel.Height = 42;
         _playbackPanel.BackColor = Theme.Window;
         _playbackPanel.ColumnCount = 2;
-        _playbackPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 104F));
+        _playbackPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 160F));
         _playbackPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
         _playbackPanel.RowCount = 1;
         _playbackPanel.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
         _playbackPanel.Padding = new Padding(6, 4, 6, 4);
 
-        _playPauseButton.Dock = DockStyle.Fill;
+        _playbackButtonPanel.Dock = DockStyle.Fill;
+        _playbackButtonPanel.WrapContents = false;
+        _playbackButtonPanel.Margin = Padding.Empty;
+        _playbackButtonPanel.Padding = Padding.Empty;
+        _playbackButtonPanel.BackColor = Color.Transparent;
+
+        ConfigurePlaybackButton(_previousFrameButton, "<", 34);
+        _previousFrameButton.Click += (_, _) => PlaybackStepRequested?.Invoke(-1);
+
+        ConfigurePlaybackButton(_playPauseButton, PlaybackCaptions.Play, 74);
         _playPauseButton.Enabled = false;
-        _playPauseButton.Text = PlaybackCaptions.Play;
         _playPauseButton.Click += (_, _) => PlaybackToggleRequested?.Invoke();
+
+        ConfigurePlaybackButton(_nextFrameButton, ">", 34);
+        _nextFrameButton.Click += (_, _) => PlaybackStepRequested?.Invoke(1);
 
         _playbackTrackBar.Dock = DockStyle.Fill;
         _playbackTrackBar.Minimum = 0;
@@ -83,7 +98,10 @@ public sealed class PreviewZoomForm : Form
         _playbackTrackBar.Scroll += PlaybackTrackBar_Scroll;
         _playbackTrackBar.MouseWheel += PlaybackTrackBar_MouseWheel;
 
-        _playbackPanel.Controls.Add(_playPauseButton, 0, 0);
+        _playbackButtonPanel.Controls.Add(_previousFrameButton);
+        _playbackButtonPanel.Controls.Add(_playPauseButton);
+        _playbackButtonPanel.Controls.Add(_nextFrameButton);
+        _playbackPanel.Controls.Add(_playbackButtonPanel, 0, 0);
         _playbackPanel.Controls.Add(_playbackTrackBar, 1, 0);
         _scrollPanel.Controls.Add(_pictureBox);
         Controls.Add(_scrollPanel);
@@ -190,7 +208,9 @@ public sealed class PreviewZoomForm : Form
 
     public void SetPlaybackState(bool isOpen, bool isPaused)
     {
+        _previousFrameButton.Enabled = isOpen && _playbackTotalTime > TimeSpan.Zero;
         _playPauseButton.Enabled = isOpen && _playbackTotalTime > TimeSpan.Zero;
+        _nextFrameButton.Enabled = isOpen && _playbackTotalTime > TimeSpan.Zero;
         _playPauseButton.Text = isPaused
             ? PlaybackCaptions.Play
             : PlaybackCaptions.Pause;
@@ -229,6 +249,50 @@ public sealed class PreviewZoomForm : Form
         _sourceImage?.Dispose();
         _sourceImage = null;
         base.OnFormClosed(e);
+    }
+
+    protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+    {
+        if ((keyData & (Keys.Control | Keys.Alt)) == Keys.None)
+        {
+            Keys keyCode = keyData & Keys.KeyCode;
+            if (keyCode == Keys.Left)
+            {
+                PlaybackStepRequested?.Invoke(-1);
+                return true;
+            }
+
+            if (keyCode == Keys.Right)
+            {
+                PlaybackStepRequested?.Invoke(1);
+                return true;
+            }
+
+            if (keyCode == Keys.Space)
+            {
+                PlaybackToggleRequested?.Invoke();
+                return true;
+            }
+        }
+
+        return base.ProcessCmdKey(ref msg, keyData);
+    }
+
+    private static void ConfigurePlaybackButton(
+        Button button,
+        string text,
+        int width)
+    {
+        button.Text = text;
+        button.Width = width;
+        button.Height = 30;
+        button.Margin = new Padding(0, 0, 2, 0);
+        button.Padding = Padding.Empty;
+        button.FlatStyle = FlatStyle.Flat;
+        button.BackColor = Theme.SurfaceRaised;
+        button.ForeColor = Theme.Text;
+        button.Enabled = false;
+        button.TabStop = false;
     }
 
     private void PreviewZoomForm_MouseWheel(object? sender, MouseEventArgs e)

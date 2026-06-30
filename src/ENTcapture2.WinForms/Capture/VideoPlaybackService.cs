@@ -16,7 +16,7 @@ public sealed class VideoPlaybackService : IAsyncDisposable
     private int _fileIndex;
     private long _segmentStartFrame;
     private bool _isPaused;
-    private TimeSpan? _pendingSeekTime;
+    private long? _pendingSeekFrame;
 
     public event Action<Bitmap, PlaybackPosition>? FrameReady;
 
@@ -70,7 +70,7 @@ public sealed class VideoPlaybackService : IAsyncDisposable
         lock (_stateLock)
         {
             _isPaused = false;
-            _pendingSeekTime = null;
+            _pendingSeekFrame = null;
         }
 
         _cancellation = new CancellationTokenSource();
@@ -97,11 +97,14 @@ public sealed class VideoPlaybackService : IAsyncDisposable
 
     public void Seek(TimeSpan time)
     {
+        SeekFrame(FindFrameForTime(time));
+    }
+
+    public void SeekFrame(long frame)
+    {
         lock (_stateLock)
         {
-            _pendingSeekTime = time < TimeSpan.Zero
-                ? TimeSpan.Zero
-                : time;
+            _pendingSeekFrame = Math.Max(0, frame);
             _isPaused = true;
         }
     }
@@ -139,7 +142,7 @@ public sealed class VideoPlaybackService : IAsyncDisposable
             _segmentDurations = [];
             _fileIndex = 0;
             _segmentStartFrame = 0;
-            _pendingSeekTime = null;
+            _pendingSeekFrame = null;
         }
     }
 
@@ -172,38 +175,33 @@ public sealed class VideoPlaybackService : IAsyncDisposable
         while (!cancellationToken.IsCancellationRequested)
         {
             bool paused;
-            TimeSpan? seekTime;
+            long? seekFrame;
             lock (_stateLock)
             {
                 paused = _isPaused;
-                seekTime = _pendingSeekTime;
-                _pendingSeekTime = null;
+                seekFrame = _pendingSeekFrame;
+                _pendingSeekFrame = null;
             }
 
-            if (seekTime.HasValue)
+            if (seekFrame.HasValue)
             {
-                TimeSpan targetTime = seekTime.Value > totalDuration
-                    ? totalDuration
-                    : seekTime.Value;
-                int targetSegment = FindSegment(targetTime);
+                long targetFrame = Math.Clamp(
+                    seekFrame.Value,
+                    0,
+                    frameCount - 1);
+                int targetSegment = FindSegmentByFrame(targetFrame);
                 if (targetSegment != _fileIndex)
                 {
                     OpenSegment(targetSegment);
                 }
 
-                TimeSpan segmentStartTime = TimeSpan.FromTicks(
-                    _segmentDurations
-                        .Take(_fileIndex)
-                        .Sum(item => item.Ticks));
-                TimeSpan segmentTime = targetTime - segmentStartTime;
-                if (segmentTime < TimeSpan.Zero)
-                {
-                    segmentTime = TimeSpan.Zero;
-                }
-
+                long segmentFrame = Math.Clamp(
+                    targetFrame - _segmentStartFrame,
+                    0,
+                    _segmentFrameCounts[_fileIndex] - 1);
                 _capture.Set(
-                    VideoCaptureProperties.PosMsec,
-                    segmentTime.TotalMilliseconds);
+                    VideoCaptureProperties.PosFrames,
+                    segmentFrame);
                 paused = true;
                 lock (_stateLock)
                 {
@@ -294,12 +292,12 @@ public sealed class VideoPlaybackService : IAsyncDisposable
                     0,
                     _segmentStartFrame +
                     (long)_capture.Get(VideoCaptureProperties.PosFrames) - 1);
-                TimeSpan currentTime = TimeSpan.FromTicks(
-                    _segmentDurations
-                        .Take(_fileIndex)
-                        .Sum(item => item.Ticks)) +
-                    TimeSpan.FromMilliseconds(
-                        Math.Max(0, timestampMilliseconds));
+                currentFrame = Math.Clamp(currentFrame, 0, frameCount - 1);
+                TimeSpan currentTime = GetTimeForFrame(
+                    currentFrame,
+                    frameCount,
+                    totalDuration,
+                    fps);
                 FrameReady?.Invoke(
                     bitmap,
                     new PlaybackPosition(
@@ -329,19 +327,65 @@ public sealed class VideoPlaybackService : IAsyncDisposable
         }
     }
 
-    private int FindSegment(TimeSpan globalTime)
+    private long FindFrameForTime(TimeSpan globalTime)
     {
-        TimeSpan offset = TimeSpan.Zero;
+        long frameCount = Math.Max(1, _segmentFrameCounts.Sum());
+        TimeSpan totalDuration = TimeSpan.FromTicks(
+            _segmentDurations.Sum(item => item.Ticks));
+        if (globalTime <= TimeSpan.Zero ||
+            totalDuration <= TimeSpan.Zero ||
+            frameCount <= 1)
+        {
+            return 0;
+        }
+
+        return Math.Clamp(
+            (long)Math.Round(
+                globalTime.Ticks /
+                (double)totalDuration.Ticks *
+                (frameCount - 1)),
+            0,
+            frameCount - 1);
+    }
+
+    private int FindSegmentByFrame(long globalFrame)
+    {
+        long offset = 0;
         for (int index = 0; index < _segmentFrameCounts.Count; index++)
         {
-            offset += _segmentDurations[index];
-            if (globalTime < offset)
+            offset += _segmentFrameCounts[index];
+            if (globalFrame < offset)
             {
                 return index;
             }
         }
 
         return Math.Max(0, _segmentFrameCounts.Count - 1);
+    }
+
+    private static TimeSpan GetTimeForFrame(
+        long currentFrame,
+        long frameCount,
+        TimeSpan totalDuration,
+        double framesPerSecond)
+    {
+        if (totalDuration > TimeSpan.Zero && frameCount > 1)
+        {
+            return TimeSpan.FromTicks(Math.Clamp(
+                (long)Math.Round(
+                    currentFrame /
+                    (double)(frameCount - 1) *
+                    totalDuration.Ticks),
+                0,
+                totalDuration.Ticks));
+        }
+
+        if (framesPerSecond > 0 && !double.IsNaN(framesPerSecond))
+        {
+            return TimeSpan.FromSeconds(currentFrame / framesPerSecond);
+        }
+
+        return TimeSpan.Zero;
     }
 
     private static PlaybackFileInfo GetFileInfo(string filePath)

@@ -71,6 +71,11 @@ public sealed class ApplicationSettings
 
     public bool OpenRsBasePatientPageAfterFiling { get; set; }
 
+    public string RsBasePatientPageUrlTemplate { get; set; } =
+        "http://127.0.0.1/~rsn/N2017.cgi?id_change=$i==";
+
+    public int RsBasePatientPageDelayMilliseconds { get; set; } = 500;
+
     public int MainWindowLeft { get; set; } = int.MinValue;
 
     public int MainWindowTop { get; set; } = int.MinValue;

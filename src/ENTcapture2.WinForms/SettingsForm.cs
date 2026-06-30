@@ -26,6 +26,10 @@ public partial class SettingsForm : Form
     private readonly TextBox _sampleYTextBox = new();
     private readonly Label _sampleImageInfoLabel = new();
     private readonly CheckBox _openRsBasePatientPageCheckBox = new();
+    private readonly Label _rsBasePatientPageUrlLabel = new();
+    private readonly TextBox _rsBasePatientPageUrlTextBox = new();
+    private readonly Label _rsBasePatientPageDelayLabel = new();
+    private readonly NumericUpDown _rsBasePatientPageDelayInput = new();
     private readonly Label _snapshotBestFrameWindowLabel = new();
     private readonly NumericUpDown _snapshotBestFrameWindowInput = new();
     private readonly Label _snapshotBestFrameWindowHintLabel = new();
@@ -239,20 +243,81 @@ public partial class SettingsForm : Form
             return;
         }
 
+        if (generalLayout.RowStyles.Count > 3)
+        {
+            generalLayout.RowStyles[3] = new RowStyle(SizeType.Absolute, 320F);
+        }
+
+        integrationCardPanel.MinimumSize = new Size(0, 320);
+        importCardPanel.MinimumSize = new Size(0, 320);
+        if (integrationLayout.RowCount < 7)
+        {
+            integrationLayout.RowCount = 7;
+            integrationLayout.RowStyles.Clear();
+            integrationLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 24F));
+            integrationLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 34F));
+            integrationLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 32F));
+            integrationLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 32F));
+            integrationLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 32F));
+            integrationLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 32F));
+            integrationLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 54F));
+        }
+
+        integrationLayout.SetRow(_autoFileCheckBox, 2);
+        integrationLayout.SetColumn(_autoFileCheckBox, 0);
+        integrationLayout.SetColumnSpan(_autoFileCheckBox, 3);
+        _autoFileCheckBox.Margin = new Padding(3, 6, 0, 0);
+
+        integrationLayout.SetRow(rsBaseReloadUrlLabel, 3);
+        integrationLayout.SetColumn(_rsBaseReloadUrlTextBox, 1);
+        integrationLayout.SetRow(_rsBaseReloadUrlTextBox, 3);
+        integrationLayout.SetColumnSpan(_rsBaseReloadUrlTextBox, 2);
+        _rsBaseReloadUrlTextBox.Margin = new Padding(3, 4, 3, 4);
+
         _openRsBasePatientPageCheckBox.AutoSize = true;
-        _openRsBasePatientPageCheckBox.Margin = new Padding(3, 3, 0, 0);
+        _openRsBasePatientPageCheckBox.Margin = new Padding(3, 6, 0, 0);
         _openRsBasePatientPageCheckBox.Text =
             "取込後に患者ページをブラウザで開く";
 
-        if (integrationLayout.RowCount < 5)
-        {
-            integrationLayout.RowCount = 5;
-            integrationLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 32F));
-        }
+        integrationLayout.SetColumn(_openRsBasePatientPageCheckBox, 0);
+        integrationLayout.SetColumnSpan(_openRsBasePatientPageCheckBox, 3);
+        integrationLayout.Controls.Add(_openRsBasePatientPageCheckBox, 0, 4);
 
-        integrationLayout.SetColumnSpan(_openRsBasePatientPageCheckBox, 2);
-        integrationLayout.Controls.Add(_openRsBasePatientPageCheckBox,1, 4);
-        Theme.Apply(_openRsBasePatientPageCheckBox);
+        _rsBasePatientPageUrlLabel.Anchor = AnchorStyles.Left;
+        _rsBasePatientPageUrlLabel.AutoSize = false;
+        _rsBasePatientPageUrlLabel.Dock = DockStyle.Fill;
+        _rsBasePatientPageUrlLabel.Text = "患者表示URL" +
+            Environment.NewLine +
+            "($iは患者ID)";
+        _rsBasePatientPageUrlLabel.TextAlign = ContentAlignment.MiddleLeft;
+        integrationLayout.SetRow(_rsBasePatientPageUrlLabel, 6);
+        integrationLayout.SetColumn(_rsBasePatientPageUrlLabel, 0);
+        integrationLayout.Controls.Add(_rsBasePatientPageUrlLabel, 0, 6);
+
+        _rsBasePatientPageUrlTextBox.Anchor =
+            AnchorStyles.Left | AnchorStyles.Right;
+        _rsBasePatientPageUrlTextBox.Dock = DockStyle.None;
+        _rsBasePatientPageUrlTextBox.Margin = new Padding(3, 15, 3, 4);
+        _rsBasePatientPageUrlTextBox.PlaceholderText =
+            "http://localhost/~rsn/N2017.cgi?id_change=$i==";
+        integrationLayout.SetColumn(_rsBasePatientPageUrlTextBox, 1);
+        integrationLayout.SetRow(_rsBasePatientPageUrlTextBox, 6);
+        integrationLayout.SetColumnSpan(_rsBasePatientPageUrlTextBox, 2);
+        integrationLayout.Controls.Add(_rsBasePatientPageUrlTextBox, 1, 6);
+
+        _rsBasePatientPageDelayLabel.Anchor = AnchorStyles.Left;
+        _rsBasePatientPageDelayLabel.AutoSize = true;
+        _rsBasePatientPageDelayLabel.Text = "表示前待機(ms)";
+        integrationLayout.Controls.Add(_rsBasePatientPageDelayLabel, 0, 5);
+
+        _rsBasePatientPageDelayInput.Anchor = AnchorStyles.Left;
+        _rsBasePatientPageDelayInput.Increment = 500;
+        _rsBasePatientPageDelayInput.Maximum = 60000;
+        _rsBasePatientPageDelayInput.Minimum = 0;
+        _rsBasePatientPageDelayInput.Width = 100;
+        integrationLayout.Controls.Add(_rsBasePatientPageDelayInput, 1, 5);
+
+        Theme.Apply(integrationLayout);
     }
 
     private void ConfigureSnapshotBestFrameOption()
@@ -363,6 +428,12 @@ public partial class SettingsForm : Form
             _autoFileCheckBox.Checked = Settings.AutoFileToRsBase;
             _openRsBasePatientPageCheckBox.Checked =
                 Settings.OpenRsBasePatientPageAfterFiling;
+            _rsBasePatientPageUrlTextBox.Text =
+                Settings.RsBasePatientPageUrlTemplate;
+            _rsBasePatientPageDelayInput.Value = Math.Clamp(
+                Settings.RsBasePatientPageDelayMilliseconds,
+                0,
+                60000);
             RefreshPresetList(Settings.SelectedPresetId);
         }
         finally
@@ -1259,6 +1330,10 @@ public partial class SettingsForm : Form
         Settings.AutoFileToRsBase = _autoFileCheckBox.Checked;
         Settings.OpenRsBasePatientPageAfterFiling =
             _openRsBasePatientPageCheckBox.Checked;
+        Settings.RsBasePatientPageUrlTemplate =
+            _rsBasePatientPageUrlTextBox.Text.Trim();
+        Settings.RsBasePatientPageDelayMilliseconds =
+            decimal.ToInt32(_rsBasePatientPageDelayInput.Value);
         if (Settings.SelectedPresetId is null ||
             Settings.Presets.All(item => item.Id != Settings.SelectedPresetId))
         {
@@ -1357,6 +1432,10 @@ public partial class SettingsForm : Form
         Settings.AutoFileToRsBase = _autoFileCheckBox.Checked;
         Settings.OpenRsBasePatientPageAfterFiling =
             _openRsBasePatientPageCheckBox.Checked;
+        Settings.RsBasePatientPageUrlTemplate =
+            _rsBasePatientPageUrlTextBox.Text.Trim();
+        Settings.RsBasePatientPageDelayMilliseconds =
+            decimal.ToInt32(_rsBasePatientPageDelayInput.Value);
         if (Settings.SelectedPresetId is null ||
             Settings.Presets.All(item => item.Id != Settings.SelectedPresetId))
         {
@@ -1524,6 +1603,10 @@ public partial class SettingsForm : Form
             AutoFileToRsBase = source.AutoFileToRsBase,
             OpenRsBasePatientPageAfterFiling =
                 source.OpenRsBasePatientPageAfterFiling,
+            RsBasePatientPageUrlTemplate =
+                source.RsBasePatientPageUrlTemplate,
+            RsBasePatientPageDelayMilliseconds =
+                source.RsBasePatientPageDelayMilliseconds,
             MainWindowLeft = source.MainWindowLeft,
             MainWindowTop = source.MainWindowTop,
             MainWindowWidth = source.MainWindowWidth,

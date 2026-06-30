@@ -175,6 +175,12 @@ public sealed class JsonSettingsStore : ISettingsStore
             string.IsNullOrWhiteSpace(settings.RsBaseReloadUrl)
                 ? "http://localhost/~rsn/2000"
                 : settings.RsBaseReloadUrl.Trim();
+        settings.RsBasePatientPageUrlTemplate =
+            string.IsNullOrWhiteSpace(settings.RsBasePatientPageUrlTemplate)
+                ? ApplicationSettings.CreateDefault().RsBasePatientPageUrlTemplate
+                : settings.RsBasePatientPageUrlTemplate.Trim();
+        settings.RsBasePatientPageDelayMilliseconds =
+            Math.Clamp(settings.RsBasePatientPageDelayMilliseconds, 0, 60000);
         settings.MainWindowWidth =
             Math.Clamp(settings.MainWindowWidth, 0, 10000);
         settings.MainWindowHeight =

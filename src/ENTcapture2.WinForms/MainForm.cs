@@ -53,6 +53,9 @@ public partial class MainForm : Form
     private readonly ContextMenuStrip _morePresetsMenu = new();
     private readonly FlowLayoutPanel _simpleNbiPanel = new();
     private readonly CheckBox _simpleNbiCheckBox = new();
+    private readonly FlowLayoutPanel _playbackButtonPanel = new();
+    private readonly ModernButton _previousFrameButton = new();
+    private readonly ModernButton _nextFrameButton = new();
 
     private ApplicationSettings _settings = ApplicationSettings.CreateDefault();
     private CapturePreset? _selectedPreset;
@@ -146,6 +149,35 @@ public partial class MainForm : Form
         ApplyRuntimePresentation();
         InitializeRuntimeChoices();
         WireEvents();
+    }
+
+    protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+    {
+        if (_playbackService.IsOpen &&
+            !IsPlaybackShortcutTextInputActive() &&
+            (keyData & (Keys.Control | Keys.Alt)) == Keys.None)
+        {
+            Keys keyCode = keyData & Keys.KeyCode;
+            if (keyCode == Keys.Left)
+            {
+                StepPlaybackFrames(-1);
+                return true;
+            }
+
+            if (keyCode == Keys.Right)
+            {
+                StepPlaybackFrames(1);
+                return true;
+            }
+
+            if (keyCode == Keys.Space)
+            {
+                TogglePlaybackPause();
+                return true;
+            }
+        }
+
+        return base.ProcessCmdKey(ref msg, keyData);
     }
 
     private void ApplyRuntimePresentation()
@@ -326,6 +358,7 @@ public partial class MainForm : Form
             _playPauseButton,
             PlaybackCaptions.Pause,
             Theme.SurfaceRaised);
+        ConfigurePlaybackStepControls();
         ConfigureModernButton(
             _openClipEditorButton,
             "✂動画編集",
@@ -1016,7 +1049,9 @@ public partial class MainForm : Form
         _previewBox.MouseUp += PreviewBox_MouseUp;
         _previewBox.Paint += PreviewBox_Paint;
         _previewBox.MouseDoubleClick += PreviewBox_MouseDoubleClick;
+        _previousFrameButton.Click += (_, _) => StepPlaybackFrames(-1);
         _playPauseButton.Click += PlayPauseButton_Click;
+        _nextFrameButton.Click += (_, _) => StepPlaybackFrames(1);
         _openClipEditorButton.Click += OpenClipEditorButton_Click;
         _closePlaybackButton.Click += async (_, _) => await ClosePlaybackAsync();
         _playbackTrackBar.MouseDown += (_, _) => _isSeekingPlayback = true;
@@ -2849,10 +2884,64 @@ public partial class MainForm : Form
         UpdatePlaybackControlCaptions();
     }
 
+    private void StepPlaybackFrames(int frameOffset)
+    {
+        if (!_playbackService.IsOpen || frameOffset == 0)
+        {
+            return;
+        }
+
+        PlaybackPosition? position = _lastPlaybackPosition;
+        if (position is not null && position.FrameCount > 0)
+        {
+            long targetFrame = Math.Clamp(
+                position.CurrentFrame + frameOffset,
+                0,
+                position.FrameCount - 1);
+            _isSeekingPlayback = false;
+            _playbackService.SeekFrame(targetFrame);
+            UpdatePlaybackControlCaptions();
+            return;
+        }
+
+        TimeSpan currentTime = GetCurrentPlaybackTime();
+        double framesPerSecond = position?.FramesPerSecond ?? 30;
+        if (framesPerSecond <= 0 || double.IsNaN(framesPerSecond))
+        {
+            framesPerSecond = 30;
+        }
+
+        long stepTicks = Math.Max(
+            1,
+            (long)Math.Round(TimeSpan.TicksPerSecond / framesPerSecond));
+        long targetTicks = currentTime.Ticks + (stepTicks * frameOffset);
+        _isSeekingPlayback = false;
+        SeekPlayback(TimeSpan.FromTicks(Math.Max(0, targetTicks)));
+        UpdatePlaybackControlCaptions();
+    }
+
+    private bool IsPlaybackShortcutTextInputActive()
+    {
+        Control? control = ActiveControl;
+        while (control is not null)
+        {
+            if (control is TextBoxBase || control is ComboBox)
+            {
+                return true;
+            }
+
+            control = control.Parent;
+        }
+
+        return false;
+    }
+
     private void UpdatePlaybackControlCaptions()
     {
         bool isOpen = _playbackService.IsOpen;
         bool isPaused = !isOpen || _playbackService.IsPaused;
+        _previousFrameButton.Enabled = isOpen;
+        _nextFrameButton.Enabled = isOpen;
         _playPauseButton.Text = isPaused
             ? PlaybackCaptions.Play
             : PlaybackCaptions.Pause;
@@ -2916,10 +3005,32 @@ public partial class MainForm : Form
                 _playbackTrackBar.Value /
                 (double)_playbackTrackBar.Maximum *
                 totalTime.Ticks);
-            _playbackService.Seek(TimeSpan.FromTicks(
+            SeekPlayback(TimeSpan.FromTicks(
                 Math.Clamp(ticks, 0, totalTime.Ticks)));
-            UpdatePlaybackControlCaptions();
         }
+    }
+
+    private void SeekPlayback(TimeSpan time)
+    {
+        if (_lastPlaybackPosition is { } position &&
+            position.TotalTime > TimeSpan.Zero &&
+            position.FrameCount > 1)
+        {
+            long targetFrame = Math.Clamp(
+                (long)Math.Round(
+                    time.Ticks /
+                    (double)position.TotalTime.Ticks *
+                    (position.FrameCount - 1)),
+                0,
+                position.FrameCount - 1);
+            _playbackService.SeekFrame(targetFrame);
+        }
+        else
+        {
+            _playbackService.Seek(time);
+        }
+
+        UpdatePlaybackControlCaptions();
     }
 
     private void MarkClipStartButton_Click(object? sender, EventArgs e)
@@ -4097,6 +4208,8 @@ public partial class MainForm : Form
                 PreviewZoomForm_PlaybackSeekRequested;
             _previewZoomForm.PlaybackToggleRequested +=
                 PreviewZoomForm_PlaybackToggleRequested;
+            _previewZoomForm.PlaybackStepRequested +=
+                PreviewZoomForm_PlaybackStepRequested;
             _previewZoomForm.FormClosed += async (_, _) =>
             {
                 if (_previewZoomForm is not null)
@@ -4146,8 +4259,7 @@ public partial class MainForm : Form
             return;
         }
 
-        _playbackService.Seek(time);
-        UpdatePlaybackControlCaptions();
+        SeekPlayback(time);
     }
 
     private CapturePreset? GetActiveSnapshotPreset()
@@ -4160,6 +4272,11 @@ public partial class MainForm : Form
     private void PreviewZoomForm_PlaybackToggleRequested()
     {
         TogglePlaybackPause();
+    }
+
+    private void PreviewZoomForm_PlaybackStepRequested(int frameOffset)
+    {
+        StepPlaybackFrames(frameOffset);
     }
 
     private double CalculateInitialZoom(Size imageSize)
@@ -5036,6 +5153,80 @@ public partial class MainForm : Form
                 ? Theme.AccentHover
                 : Theme.ButtonHover;
         button.Margin = new Padding(0, 0, 8, 0);
+    }
+
+    private void ConfigurePlaybackStepControls()
+    {
+        if (playbackPanel.ColumnStyles.Count > 0)
+        {
+            playbackPanel.ColumnStyles[0].Width = 164F;
+        }
+
+        ConfigurePlaybackStepButton(_previousFrameButton, "<");
+        ConfigurePlaybackStepButton(_nextFrameButton, ">");
+
+        _playbackButtonPanel.Dock = DockStyle.Fill;
+        _playbackButtonPanel.WrapContents = false;
+        _playbackButtonPanel.Margin = Padding.Empty;
+        _playbackButtonPanel.Padding = Padding.Empty;
+        _playbackButtonPanel.BackColor = Color.Transparent;
+
+        _playPauseButton.Dock = DockStyle.None;
+        _playPauseButton.Width = 74;
+        _playPauseButton.Height = 34;
+        _playPauseButton.Margin = new Padding(2, 0, 2, 0);
+
+        if (_playPauseButton.Parent == playbackPanel)
+        {
+            playbackPanel.Controls.Remove(_playPauseButton);
+        }
+
+        if (!_playbackButtonPanel.Controls.Contains(_previousFrameButton))
+        {
+            _playbackButtonPanel.Controls.Add(_previousFrameButton);
+        }
+
+        if (!_playbackButtonPanel.Controls.Contains(_playPauseButton))
+        {
+            _playbackButtonPanel.Controls.Add(_playPauseButton);
+        }
+
+        if (!_playbackButtonPanel.Controls.Contains(_nextFrameButton))
+        {
+            _playbackButtonPanel.Controls.Add(_nextFrameButton);
+        }
+
+        if (!playbackPanel.Controls.Contains(_playbackButtonPanel))
+        {
+            playbackPanel.Controls.Add(_playbackButtonPanel, 0, 0);
+        }
+
+        playbackPanel.SetColumn(_playbackButtonPanel, 0);
+        playbackPanel.SetRow(_playbackButtonPanel, 0);
+        _thumbnailToolTip.SetToolTip(
+            _previousFrameButton,
+            "1フレーム戻る (←)");
+        _thumbnailToolTip.SetToolTip(
+            _nextFrameButton,
+            "1フレーム進む (→)");
+    }
+
+    private static void ConfigurePlaybackStepButton(
+        ModernButton button,
+        string text)
+    {
+        button.Text = text;
+        button.FillColor = Theme.SurfaceRaised;
+        button.BackColor = Theme.SurfaceRaised;
+        button.HoverColor = Theme.ButtonHover;
+        button.ForeColor = Theme.Text;
+        button.FlatStyle = FlatStyle.Flat;
+        button.Width = 34;
+        button.Height = 34;
+        button.MinimumSize = new Size(34, 34);
+        button.Margin = new Padding(0, 0, 2, 0);
+        button.Padding = Padding.Empty;
+        button.TabStop = false;
     }
 
     private static string SanitizeFileName(string value)

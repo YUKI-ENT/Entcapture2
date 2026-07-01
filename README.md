@@ -160,7 +160,7 @@ Windows のカメラアプリやメーカー付属ソフトで映像が出るこ
 動画ファイリングを行う場合は一時録画が必要です。
 そのため、`動画ファイリング` と `プレビューのみ` は同時に ON にならないようになっています。
 
-<img width="1242" height="972" alt="201" src="https://github.com/user-attachments/assets/ef86a5fc-eef3-4eb1-a4bd-428c3d005e38" />
+<img width="1242" height="972" alt="image" src="https://github.com/user-attachments/assets/7fe76587-db1f-4b56-bf21-5b846cf0ded2" />
 
 <img width="1242" height="972" alt="202" src="https://github.com/user-attachments/assets/2d77d66e-6e05-4918-94cd-d7b536535f93" />
 
@@ -176,10 +176,11 @@ Windows のカメラアプリやメーカー付属ソフトで映像が出るこ
 静止画は設定した出力フォルダに JPEG として保存されます。
 
 プリセットでROIや文字埋め込みを設定している場合は、保存時に反映されます。
-ベストショット自動判定が有効な場合は、直前フレームの中からブレが少ないものを選んで保存します。
+ベストショット自動判定が有効な場合は、OpenCVの機能を使って直前フレームの中からブレが少ないものを選んで保存します。
 
 <img width="640" height="480" alt="12347~0147~2026_06_28~内視鏡~RSB" src="https://github.com/user-attachments/assets/d46826b6-adb0-49aa-9fe3-7dccdc854a3c" />
 
+※ `プレビューのみ` が設定されている場合はベストショット機能は利用できません
 
 ### 6. 動画を保存する
 

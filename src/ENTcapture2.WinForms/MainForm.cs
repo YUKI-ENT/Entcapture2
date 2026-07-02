@@ -23,6 +23,9 @@ public partial class MainForm : Form
     private const int SwpNoSize = 0x0001;
     private const int SwpNoMove = 0x0002;
     private const int DwmwaExtendedFrameBounds = 9;
+    private const int SidePanelBaseWidth = 310;
+    private const int SideCardBaseWidth = 294;
+    private const int SideToggleBaseWidth = 40;
     private static readonly HashSet<string> OutputMediaExtensions = new(
         StringComparer.OrdinalIgnoreCase)
     {
@@ -211,14 +214,14 @@ public partial class MainForm : Form
             10F,
             false);
         ConfigureComboBox(_examinationTypeComboBox);
-        _examinationTypeComboBox.Width = 160;
+        _examinationTypeComboBox.Width = ScaleDpi(160);
 
         ConfigureModernButton(
             _morePresetsDropDownButton,
             "その他 ▾",
             Theme.SurfaceRaised);
-        _morePresetsDropDownButton.Width = 128;
-        _morePresetsDropDownButton.Height = 38;
+        SetButtonWidthForText(_morePresetsDropDownButton, 128);
+        _morePresetsDropDownButton.Height = ScaleDpi(38);
         _morePresetsDropDownButton.Margin = new Padding(0);
         SetMorePresetsDropDownSelected(false);
         ConfigureMorePresetsMenu();
@@ -229,7 +232,7 @@ public partial class MainForm : Form
             _managePresetsButton,
             "⚙ 設定",
             Theme.SurfaceRaised);
-        _managePresetsButton.Width = 96;
+        SetButtonWidthForText(_managePresetsButton, 96);
         ConfigureModernButton(
             _openPlaybackButton,
             PlaybackCaptions.OpenPlayback,
@@ -263,23 +266,24 @@ public partial class MainForm : Form
         ConfigureLabel(cameraLabel, "ビデオソース", Theme.Muted, 10F, false);
         ConfigureComboBox(_deviceComboBox);
         _deviceComboBox.Dock = DockStyle.None;
-        _deviceComboBox.Width = 200;
-        _deviceComboBox.Margin = new Padding(4, 2, 12, 0);
+        _deviceComboBox.Width = ScaleDpi(200);
+        _deviceComboBox.Margin = ScaleDpi(new Padding(4, 2, 12, 0));
         ConfigureLabel(resolutionLabel, "解像度", Theme.Muted, 10F, false);
         ConfigureComboBox(_resolutionComboBox);
         _resolutionComboBox.Dock = DockStyle.None;
-        _resolutionComboBox.Width = 210;
-        _resolutionComboBox.Margin = new Padding(4, 2, 8, 0);
-        cameraLabel.Margin = new Padding(0, 5, 0, 0);
-        resolutionLabel.Margin = new Padding(0, 5, 0, 0);
+        _resolutionComboBox.Width = ScaleDpi(210);
+        _resolutionComboBox.Margin = ScaleDpi(new Padding(4, 2, 8, 0));
+        cameraLabel.Margin = ScaleDpi(new Padding(0, 5, 0, 0));
+        resolutionLabel.Margin = ScaleDpi(new Padding(0, 5, 0, 0));
         ConfigureModernButton(_startButton, PlaybackCaptions.StartButton, Theme.Accent);
         ConfigureModernButton(
             _refreshDevicesButton,
             "↻ 再検索",
             Theme.SurfaceRaised);
-        _refreshDevicesButton.MinimumSize = new Size(70, 24);
-        _refreshDevicesButton.Size = new Size(82, 24);
-        _refreshDevicesButton.Margin = new Padding(0, 1, 0, 0);
+        _refreshDevicesButton.MinimumSize = ScaleDpi(new Size(70, 24));
+        _refreshDevicesButton.Size = ScaleDpi(new Size(82, 24));
+        SetButtonWidthForText(_refreshDevicesButton, 82);
+        _refreshDevicesButton.Margin = ScaleDpi(new Padding(0, 1, 0, 0));
         _toggleSidePanelButton.Text = "＜ 補正";
         _toggleSidePanelButton.FillColor = Theme.SurfaceRaised;
         _toggleSidePanelButton.BackColor = Theme.SurfaceRaised;
@@ -295,8 +299,8 @@ public partial class MainForm : Form
         _toggleSidePanelButton.TextAlign = ContentAlignment.MiddleCenter;
         _toggleSidePanelButton.Dock = DockStyle.None;
         _toggleSidePanelButton.Anchor = AnchorStyles.None;
-        _toggleSidePanelButton.Size = new Size(38, 112);
-        _toggleSidePanelButton.Margin = new Padding(1);
+        _toggleSidePanelButton.Size = ScaleDpi(new Size(38, 112));
+        _toggleSidePanelButton.Margin = ScaleDpi(new Padding(1));
 
         ConfigureCard(filterCard);
         ConfigureLabel(
@@ -321,7 +325,7 @@ public partial class MainForm : Form
         }
 
         _simpleNbiCheckBox.AutoSize = true;
-        _simpleNbiCheckBox.Margin = new Padding(3, 6, 3, 3);
+        _simpleNbiCheckBox.Margin = ScaleDpi(new Padding(3, 6, 3, 3));
         _simpleNbiCheckBox.Text = "簡易NBI";
         _simpleNbiCheckBox.ForeColor = Theme.Text;
         if (!_simpleNbiPanel.Controls.Contains(_simpleNbiCheckBox))
@@ -382,15 +386,19 @@ public partial class MainForm : Form
             10F,
             false);
 
-        sidePanel.Width = 310;
-        sourceCard.Width = 294;
-        filterCard.Width = 294;
-        captureCard.Width = 294;
+        int sidePanelWidth = GetSidePanelWidth();
+        int sideCardWidth = Math.Max(
+            ScaleDpi(SideCardBaseWidth),
+            sidePanelWidth - ScaleDpi(16));
+        sidePanel.Width = sidePanelWidth;
+        sourceCard.Width = sideCardWidth;
+        filterCard.Width = sideCardWidth;
+        captureCard.Width = sideCardWidth;
         filterCard.Visible = true;
         captureCard.Visible = true;
-        captureCard.MinimumSize = new Size(294, 0);
-        filterCard.MinimumSize = new Size(294, 0);
-        _savePresetButton.Padding = new Padding(4, 0, 4, 0);
+        captureCard.MinimumSize = new Size(sideCardWidth, 0);
+        filterCard.MinimumSize = new Size(sideCardWidth, 0);
+        _savePresetButton.Padding = ScaleDpi(new Padding(4, 0, 4, 0));
         ApplyPrimaryActionButtonLayout();
         sourceCard.Visible = false;
         sidePanel.Visible = false;
@@ -420,7 +428,7 @@ public partial class MainForm : Form
 
         _sourceHeaderPanel.AutoSize = true;
         _sourceHeaderPanel.WrapContents = false;
-        _sourceHeaderPanel.Margin = new Padding(0, 0, 12, 0);
+        _sourceHeaderPanel.Margin = ScaleDpi(new Padding(0, 0, 12, 0));
         _sourceHeaderPanel.Controls.Add(cameraLabel);
         _sourceHeaderPanel.Controls.Add(_deviceComboBox);
         _sourceHeaderPanel.Controls.Add(resolutionLabel);
@@ -437,8 +445,8 @@ public partial class MainForm : Form
         headerLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         headerLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         headerLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        patientPanel.Margin = new Padding(0, 6, 0, 0);
-        _quickPresetPanel.Margin = new Padding(0, 6, 0, 0);
+        patientPanel.Margin = ScaleDpi(new Padding(0, 6, 0, 0));
+        _quickPresetPanel.Margin = ScaleDpi(new Padding(0, 6, 0, 0));
         headerLayout.Controls.Add(_sourceHeaderPanel, 0, 0);
         headerLayout.Controls.Add(primaryActionPanel, 1, 0);
         headerLayout.SetRowSpan(primaryActionPanel, 3);
@@ -456,7 +464,7 @@ public partial class MainForm : Form
         workspaceLayout.ColumnStyles.Add(
             new ColumnStyle(SizeType.Percent, 100F));
         workspaceLayout.ColumnStyles.Add(
-            new ColumnStyle(SizeType.Absolute, 40F));
+            new ColumnStyle(SizeType.Absolute, ScaleDpi(SideToggleBaseWidth)));
         workspaceLayout.ColumnStyles.Add(
             new ColumnStyle(SizeType.Absolute, 0F));
         workspaceLayout.Controls.Add(previewSurfacePanel, 0, 0);
@@ -514,7 +522,63 @@ public partial class MainForm : Form
             Math.Max(8, _previewBox.Top + (_previewBox.Height - _previewMessage.Height) / 2));
     }
 
-    private static void ConfigureCard(TableLayoutPanel card)
+    private int ScaleDpi(int value)
+    {
+        return LogicalToDeviceUnits(value);
+    }
+
+    private Size ScaleDpi(Size size)
+    {
+        return new Size(ScaleDpi(size.Width), ScaleDpi(size.Height));
+    }
+
+    private Padding ScaleDpi(Padding padding)
+    {
+        return new Padding(
+            ScaleDpi(padding.Left),
+            ScaleDpi(padding.Top),
+            ScaleDpi(padding.Right),
+            ScaleDpi(padding.Bottom));
+    }
+
+    private int MeasureTextWidth(Control control, string text)
+    {
+        if (string.IsNullOrEmpty(text))
+        {
+            return 0;
+        }
+
+        return TextRenderer.MeasureText(
+            text,
+            control.Font,
+            Size.Empty,
+            TextFormatFlags.NoPadding).Width;
+    }
+
+    private void SetButtonWidthForText(
+        Button button,
+        int minimumBaseWidth,
+        int horizontalPaddingBase = 24)
+    {
+        int measuredWidth =
+            MeasureTextWidth(button, button.Text) +
+            ScaleDpi(horizontalPaddingBase);
+        button.Width = Math.Max(ScaleDpi(minimumBaseWidth), measuredWidth);
+    }
+
+    private int GetSidePanelWidth()
+    {
+        int contentWidth =
+            Math.Max(
+                ScaleDpi(SideCardBaseWidth),
+                MeasureTextWidth(
+                    _savePresetButton,
+                    _savePresetButton.Text) +
+                ScaleDpi(48));
+        return Math.Max(ScaleDpi(SidePanelBaseWidth), contentWidth + ScaleDpi(16));
+    }
+
+    private void ConfigureCard(TableLayoutPanel card)
     {
         card.SuspendLayout();
         card.RowStyles.Clear();
@@ -530,10 +594,13 @@ public partial class MainForm : Form
             card.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         }
 
-        card.Margin = new Padding(0, 0, 0, 12);
-        card.Padding = new Padding(16);
-        card.Width = 294;
-        card.MinimumSize = new Size(294, 0);
+        int cardWidth = Math.Max(
+            ScaleDpi(SideCardBaseWidth),
+            GetSidePanelWidth() - ScaleDpi(16));
+        card.Margin = ScaleDpi(new Padding(0, 0, 0, 12));
+        card.Padding = ScaleDpi(new Padding(16));
+        card.Width = cardWidth;
+        card.MinimumSize = new Size(cardWidth, 0);
         card.ResumeLayout();
     }
 
@@ -550,27 +617,27 @@ public partial class MainForm : Form
         label.Text = text;
     }
 
-    private static void ConfigureComboBox(ComboBox comboBox)
+    private void ConfigureComboBox(ComboBox comboBox)
     {
         comboBox.BackColor = Theme.SurfaceRaised;
         comboBox.DropDownStyle = ComboBoxStyle.DropDownList;
         comboBox.FlatStyle = FlatStyle.Flat;
         comboBox.Font = Theme.BodyFont();
         comboBox.ForeColor = Theme.Text;
-        comboBox.Margin = new Padding(0, 2, 8, 8);
+        comboBox.Margin = ScaleDpi(new Padding(0, 2, 8, 8));
     }
 
-    private static void ConfigureTextBox(TextBox textBox, int width)
+    private void ConfigureTextBox(TextBox textBox, int width)
     {
         textBox.BackColor = Theme.SurfaceRaised;
         textBox.BorderStyle = BorderStyle.FixedSingle;
         textBox.Font = Theme.BodyFont();
         textBox.ForeColor = Theme.Text;
-        textBox.Margin = new Padding(4, 1, 10, 0);
-        textBox.Width = width;
+        textBox.Margin = ScaleDpi(new Padding(4, 1, 10, 0));
+        textBox.Width = ScaleDpi(width);
     }
 
-    private static void ConfigureModernButton(
+    private void ConfigureModernButton(
         ModernButton button,
         string text,
         Color fillColor)
@@ -583,9 +650,11 @@ public partial class MainForm : Form
                 ? Theme.AccentHover
                 : Theme.ButtonHover;
         button.AutoSize = false;
-        button.Height = 38;
-        button.MinimumSize = new Size(76, 38);
-        button.Margin = new Padding(0, 0, 8, 0);
+        button.Height = ScaleDpi(38);
+        button.MinimumSize = ScaleDpi(new Size(76, 38));
+        button.Padding = ScaleDpi(new Padding(12, 0, 12, 0));
+        button.Margin = ScaleDpi(new Padding(0, 0, 8, 0));
+        SetButtonWidthForText(button, 76);
     }
 
     private void ConfigureMorePresetsMenu()
@@ -620,10 +689,25 @@ public partial class MainForm : Form
         primaryActionPanel.RowStyles.Clear();
         primaryActionPanel.ColumnCount = 2;
         primaryActionPanel.RowCount = 2;
-        primaryActionPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 132F));
-        primaryActionPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 132F));
-        primaryActionPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 44F));
-        primaryActionPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 44F));
+        int columnWidth = Math.Max(
+            ScaleDpi(132),
+            new[]
+            {
+                _startButton,
+                _managePresetsButton,
+                _snapshotButton,
+                _openPlaybackButton
+            }.Max(button =>
+                MeasureTextWidth(button, button.Text) + ScaleDpi(28)));
+        int rowHeight = ScaleDpi(44);
+        primaryActionPanel.ColumnStyles.Add(
+            new ColumnStyle(SizeType.Absolute, columnWidth));
+        primaryActionPanel.ColumnStyles.Add(
+            new ColumnStyle(SizeType.Absolute, columnWidth));
+        primaryActionPanel.RowStyles.Add(
+            new RowStyle(SizeType.Absolute, rowHeight));
+        primaryActionPanel.RowStyles.Add(
+            new RowStyle(SizeType.Absolute, rowHeight));
 
         ConfigurePrimaryActionButton(_startButton, Theme.Accent);
         ConfigurePrimaryActionButton(_managePresetsButton, Theme.SurfaceRaised);
@@ -631,12 +715,12 @@ public partial class MainForm : Form
         ConfigurePrimaryActionButton(_openPlaybackButton, Theme.SurfaceRaised);
     }
 
-    private static void ConfigurePrimaryActionButton(ModernButton button, Color fillColor)
+    private void ConfigurePrimaryActionButton(ModernButton button, Color fillColor)
     {
         button.Dock = DockStyle.Fill;
-        button.Margin = new Padding(4);
-        button.Padding = new Padding(8, 0, 8, 0);
-        button.MinimumSize = new Size(116, 36);
+        button.Margin = ScaleDpi(new Padding(4));
+        button.Padding = ScaleDpi(new Padding(8, 0, 8, 0));
+        button.MinimumSize = ScaleDpi(new Size(116, 36));
         button.FillColor = fillColor;
         button.BackColor = fillColor;
         button.HoverColor =
@@ -645,7 +729,7 @@ public partial class MainForm : Form
                 : Theme.ButtonHover;
     }
 
-    private static void ConfigureSliderRow(
+    private void ConfigureSliderRow(
         TableLayoutPanel row,
         TrackBar trackBar,
         Label valueLabel,
@@ -659,16 +743,19 @@ public partial class MainForm : Form
         row.ColumnStyles.Clear();
         row.RowStyles.Clear();
         row.AutoSize = false;
-        row.Height = 42;
-        row.MinimumSize = new Size(0, 42);
+        row.Height = ScaleDpi(42);
+        row.MinimumSize = new Size(0, ScaleDpi(42));
         row.ColumnCount = 3;
         row.RowCount = 1;
         row.Dock = DockStyle.Fill;
-        row.Margin = new Padding(0, 0, 0, 4);
-        row.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 22F));
+        row.Margin = ScaleDpi(new Padding(0, 0, 0, 4));
+        row.ColumnStyles.Add(
+            new ColumnStyle(SizeType.Absolute, ScaleDpi(22)));
         row.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-        row.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 46F));
-        row.RowStyles.Add(new RowStyle(SizeType.Absolute, 42F));
+        row.ColumnStyles.Add(
+            new ColumnStyle(SizeType.Absolute, ScaleDpi(46)));
+        row.RowStyles.Add(
+            new RowStyle(SizeType.Absolute, ScaleDpi(42)));
 
         var label = new Label
         {
@@ -688,7 +775,7 @@ public partial class MainForm : Form
         valueLabel.ForeColor = Theme.Text;
         valueLabel.Text = caption == "γ" ? "1.0" : value.ToString();
         valueLabel.TextAlign = ContentAlignment.MiddleRight;
-        valueLabel.Width = 42;
+        valueLabel.Width = ScaleDpi(42);
         row.Controls.Add(label, 0, 0);
         row.Controls.Add(trackBar, 1, 0);
         row.Controls.Add(valueLabel, 2, 0);
@@ -2717,7 +2804,7 @@ public partial class MainForm : Form
         try
         {
             sidePanel.Visible = show;
-            workspaceLayout.ColumnStyles[2].Width = show ? 310 : 0;
+            workspaceLayout.ColumnStyles[2].Width = show ? GetSidePanelWidth() : 0;
             _toggleSidePanelButton.Text = show ? "＞" : "＜ 補正";
             _toggleSidePanelButton.AccessibleName = show
                 ? "詳細パネルを閉じる"
@@ -3693,9 +3780,9 @@ public partial class MainForm : Form
     private void ConfigureThumbnailStrip()
     {
         _thumbnailStripPanel.BackColor = Theme.Window;
-        _thumbnailStripPanel.Height = 84;
+        _thumbnailStripPanel.Height = ScaleDpi(84);
         _thumbnailStripPanel.Dock = DockStyle.Bottom;
-        _thumbnailStripPanel.Padding = new Padding(8, 7, 8, 7);
+        _thumbnailStripPanel.Padding = ScaleDpi(new Padding(8, 7, 8, 7));
         _thumbnailStripPanel.Margin = Padding.Empty;
         _thumbnailStripPanel.WrapContents = false;
         _thumbnailStripPanel.AutoScroll = true;
@@ -3705,15 +3792,16 @@ public partial class MainForm : Form
         _thumbnailEmptyLabel.Text =
             "静止画を保存すると、ここに直近のサムネイルを表示します";
         _thumbnailEmptyLabel.TextAlign = ContentAlignment.MiddleLeft;
-        _thumbnailEmptyLabel.Width = 280;
-        _thumbnailEmptyLabel.Height = 66;
+        _thumbnailEmptyLabel.Width = ScaleDpi(280);
+        _thumbnailEmptyLabel.Height = ScaleDpi(66);
 
         ConfigureModernButton(
             _openSnapshotFolderButton,
             "📁保存フォルダ",
             Theme.SurfaceRaised);
-        _openSnapshotFolderButton.Width = 112;
-        _openSnapshotFolderButton.Height = 54;
+        _openSnapshotFolderButton.Width = ScaleDpi(112);
+        _openSnapshotFolderButton.Height = ScaleDpi(54);
+        SetButtonWidthForText(_openSnapshotFolderButton, 112, 16);
         _openSnapshotFolderButton.Anchor =
             AnchorStyles.Right | AnchorStyles.Bottom;
 
@@ -3721,8 +3809,9 @@ public partial class MainForm : Form
             _rsBaseImportButton,
             "🔄RSBase取込",
             Theme.SurfaceRaised);
-        _rsBaseImportButton.Width = 104;
-        _rsBaseImportButton.Height = 54;
+        _rsBaseImportButton.Width = ScaleDpi(104);
+        _rsBaseImportButton.Height = ScaleDpi(54);
+        SetButtonWidthForText(_rsBaseImportButton, 104, 16);
         _rsBaseImportButton.Visible = false;
         _rsBaseImportButton.Anchor =
             AnchorStyles.Right | AnchorStyles.Bottom;
@@ -5056,7 +5145,7 @@ public partial class MainForm : Form
     {
         if (playbackPanel.ColumnStyles.Count > 0)
         {
-            playbackPanel.ColumnStyles[0].Width = 164F;
+            playbackPanel.ColumnStyles[0].Width = ScaleDpi(164);
         }
 
         ConfigurePlaybackStepButton(_previousFrameButton, "<");
@@ -5069,9 +5158,9 @@ public partial class MainForm : Form
         _playbackButtonPanel.BackColor = Color.Transparent;
 
         _playPauseButton.Dock = DockStyle.None;
-        _playPauseButton.Width = 74;
-        _playPauseButton.Height = 34;
-        _playPauseButton.Margin = new Padding(2, 0, 2, 0);
+        _playPauseButton.Width = ScaleDpi(74);
+        _playPauseButton.Height = ScaleDpi(34);
+        _playPauseButton.Margin = ScaleDpi(new Padding(2, 0, 2, 0));
 
         if (_playPauseButton.Parent == playbackPanel)
         {
@@ -5108,7 +5197,7 @@ public partial class MainForm : Form
             "1フレーム進む (→)");
     }
 
-    private static void ConfigurePlaybackStepButton(
+    private void ConfigurePlaybackStepButton(
         ModernButton button,
         string text)
     {
@@ -5118,10 +5207,10 @@ public partial class MainForm : Form
         button.HoverColor = Theme.ButtonHover;
         button.ForeColor = Theme.Text;
         button.FlatStyle = FlatStyle.Flat;
-        button.Width = 34;
-        button.Height = 34;
-        button.MinimumSize = new Size(34, 34);
-        button.Margin = new Padding(0, 0, 2, 0);
+        button.Width = ScaleDpi(34);
+        button.Height = ScaleDpi(34);
+        button.MinimumSize = ScaleDpi(new Size(34, 34));
+        button.Margin = ScaleDpi(new Padding(0, 0, 2, 0));
         button.Padding = Padding.Empty;
         button.TabStop = false;
     }

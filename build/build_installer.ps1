@@ -102,11 +102,15 @@ $PublishDir = Join-Path $RootDir "artifacts\publish\$RuntimeIdentifier"
 $InstallerDir = Join-Path $RootDir 'artifacts\installer'
 $ArtifactsDir = Join-Path $RootDir 'artifacts'
 $FfmpegDownloadScript = Join-Path $PSScriptRoot 'download_ffmpeg.ps1'
+$SignToolRetryScript = Join-Path $PSScriptRoot 'invoke_signtool_retry.ps1'
 
 if (-not (Test-Path $Project)) { Fail "Project not found: $Project" }
 if (-not (Test-Path $InnoScript)) { Fail "Inno script not found: $InnoScript" }
 if (-not (Test-Path $FfmpegDownloadScript)) {
   Fail "FFmpeg download script not found: $FfmpegDownloadScript"
+}
+if (-not (Test-Path $SignToolRetryScript)) {
+  Fail "SignTool retry script not found: $SignToolRetryScript"
 }
 
 [xml]$props = Get-Content (Join-Path $RootDir 'Directory.Build.props') -Raw
@@ -225,7 +229,12 @@ $innoArguments = @(
 if ($SkipSign) {
   $innoArguments += '/DSkipSign=1'
 } else {
-  $innoSignCommand = '$q' + $signTool + '$q sign $p $f'
+  $innoSignCommand =
+    'powershell.exe -NoProfile -ExecutionPolicy Bypass -File ' +
+    '$q' + $SignToolRetryScript + '$q ' +
+    '-SignTool ' +
+    '$q' + $signTool + '$q ' +
+    'sign $p $f'
   $innoArguments += "/SMSStore=$innoSignCommand"
   Info 'Inno Setup signing tool configured for this build.'
 }

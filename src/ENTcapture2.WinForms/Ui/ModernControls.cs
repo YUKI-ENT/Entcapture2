@@ -33,8 +33,12 @@ public sealed class ModernButton : Button
         ForeColor = Theme.Text;
         Font = Theme.BodyFont();
         Cursor = Cursors.Hand;
-        Height = 38;
-        Padding = new Padding(12, 0, 12, 0);
+        Height = LogicalToDeviceUnits(38);
+        Padding = new Padding(
+            LogicalToDeviceUnits(12),
+            0,
+            LogicalToDeviceUnits(12),
+            0);
         UseVisualStyleBackColor = false;
         MouseEnter += (_, _) => BackColor = HoverColor;
         MouseLeave += (_, _) => BackColor = FillColor;
@@ -152,8 +156,8 @@ public sealed class ModernRadioButton : RadioButton
         Font = Theme.BodyFont();
         TextAlign = ContentAlignment.MiddleCenter;
         Cursor = Cursors.Hand;
-        Height = 38;
-        Width = 128;
+        Height = LogicalToDeviceUnits(38);
+        Width = LogicalToDeviceUnits(128);
         AutoEllipsis = true;
         UseVisualStyleBackColor = false;
         MouseEnter += (_, _) =>

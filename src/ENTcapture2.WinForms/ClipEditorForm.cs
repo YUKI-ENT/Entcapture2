@@ -74,8 +74,10 @@ internal sealed class ClipEditorForm : Form
 
         Text = "動画編集・エンコード";
         StartPosition = FormStartPosition.CenterParent;
-        MinimumSize = new Size(820, 680);
-        Size = new Size(920, 760);
+        AutoScaleDimensions = new SizeF(96F, 96F);
+        AutoScaleMode = AutoScaleMode.Dpi;
+        MinimumSize = ScaleDpi(new Size(920, 720));
+        Size = ScaleDpi(new Size(1040, 820));
         BackColor = Theme.Window;
         ForeColor = Theme.Text;
         Font = Theme.BodyFont();
@@ -94,15 +96,15 @@ internal sealed class ClipEditorForm : Form
             Dock = DockStyle.Fill,
             ColumnCount = 1,
             RowCount = 7,
-            Padding = new Padding(16),
+            Padding = ScaleDpi(new Padding(16)),
             BackColor = Theme.Window
         };
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 250F));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, ScaleDpi(250)));
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 86F));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, ScaleDpi(86)));
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         Controls.Add(root);
 
@@ -119,22 +121,22 @@ internal sealed class ClipEditorForm : Form
             ColumnCount = 1,
             RowCount = 3,
             BackColor = Theme.Surface,
-            Padding = new Padding(10),
-            Margin = new Padding(0, 10, 0, 8)
+            Padding = ScaleDpi(new Padding(10)),
+            Margin = ScaleDpi(new Padding(0, 10, 0, 8))
         };
         previewPanel.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
-        previewPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 18F));
-        previewPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 34F));
+        previewPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, ScaleDpi(18)));
+        previewPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, ScaleDpi(34)));
         _previewBox.Dock = DockStyle.Fill;
         _previewBox.BackColor = Color.Black;
         _previewBox.SizeMode = PictureBoxSizeMode.Zoom;
         _rangeBar.Dock = DockStyle.Fill;
-        _rangeBar.Margin = new Padding(3, 0, 3, 0);
+        _rangeBar.Margin = ScaleDpi(new Padding(3, 0, 3, 0));
         _playbackTrackBar.Dock = DockStyle.Fill;
         _playbackTrackBar.Maximum = 1000;
         _playbackTrackBar.TickStyle = TickStyle.None;
         _positionLabel.Dock = DockStyle.Right;
-        _positionLabel.Width = 160;
+        _positionLabel.Width = ScaleDpi(170);
         _positionLabel.ForeColor = Theme.Muted;
         _positionLabel.TextAlign = ContentAlignment.MiddleRight;
         var sliderPanel = new TableLayoutPanel
@@ -150,9 +152,11 @@ internal sealed class ClipEditorForm : Form
             RowCount = 1
         };
         sliderPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-        sliderPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 170F));
+        sliderPanel.ColumnStyles.Add(
+            new ColumnStyle(SizeType.Absolute, ScaleDpi(180)));
         rangeBarPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-        rangeBarPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 170F));
+        rangeBarPanel.ColumnStyles.Add(
+            new ColumnStyle(SizeType.Absolute, ScaleDpi(180)));
         sliderPanel.Controls.Add(_playbackTrackBar, 0, 0);
         sliderPanel.Controls.Add(_positionLabel, 1, 0);
         rangeBarPanel.Controls.Add(_rangeBar, 0, 0);
@@ -165,7 +169,7 @@ internal sealed class ClipEditorForm : Form
         {
             AutoSize = true,
             WrapContents = true,
-            Margin = new Padding(0, 12, 0, 8)
+            Margin = ScaleDpi(new Padding(0, 12, 0, 8))
         };
         ConfigureButton(_setStartButton, "現在位置を始点", Theme.SurfaceRaised);
         ConfigureButton(_setEndButton, "現在位置を終点", Theme.SurfaceRaised);
@@ -188,7 +192,7 @@ internal sealed class ClipEditorForm : Form
             ColumnCount = 1,
             RowCount = 2,
             BackColor = Theme.Surface,
-            Padding = new Padding(12)
+            Padding = ScaleDpi(new Padding(12))
         };
         rangePanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         rangePanel.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
@@ -208,11 +212,14 @@ internal sealed class ClipEditorForm : Form
             Dock = DockStyle.Top,
             ColumnCount = 4,
             RowCount = 5,
-            Margin = new Padding(0, 12, 0, 8)
+            Margin = ScaleDpi(new Padding(0, 12, 0, 8))
         };
-        optionGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 130F));
-        optionGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 200F));
-        optionGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 130F));
+        optionGrid.ColumnStyles.Add(
+            new ColumnStyle(SizeType.Absolute, ScaleDpi(150)));
+        optionGrid.ColumnStyles.Add(
+            new ColumnStyle(SizeType.Absolute, ScaleDpi(240)));
+        optionGrid.ColumnStyles.Add(
+            new ColumnStyle(SizeType.Absolute, ScaleDpi(150)));
         optionGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
         root.Controls.Add(optionGrid, 0, 4);
 
@@ -275,9 +282,10 @@ internal sealed class ClipEditorForm : Form
         _bitrateInput.BackColor = Theme.SurfaceRaised;
         _bitrateInput.ForeColor = Theme.Text;
 
-        var bitratePanel = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.LeftToRight, Margin = new Padding(0) };
+        _bitrateInput.Width = ScaleDpi(120);
+        var bitratePanel = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.LeftToRight, Margin = Padding.Empty };
         bitratePanel.Controls.Add(_bitrateInput);
-        bitratePanel.Controls.Add(new Label { Text = "kbps", AutoSize = true, ForeColor = Theme.Muted, Anchor = AnchorStyles.Left, Margin = new Padding(4, 6, 0, 0) });
+        bitratePanel.Controls.Add(new Label { Text = "kbps", AutoSize = true, ForeColor = Theme.Muted, Anchor = AnchorStyles.Left, Margin = ScaleDpi(new Padding(4, 6, 0, 0)) });
         optionGrid.Controls.Add(bitratePanel, 1, 2);
 
         AddLabel(optionGrid, "圧縮目標", 2, 2);
@@ -287,9 +295,10 @@ internal sealed class ClipEditorForm : Form
         _compressionPercentInput.BackColor = Theme.SurfaceRaised;
         _compressionPercentInput.ForeColor = Theme.Text;
 
-        var percentPanel = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.LeftToRight, Margin = new Padding(0) };
+        _compressionPercentInput.Width = ScaleDpi(96);
+        var percentPanel = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.LeftToRight, Margin = Padding.Empty };
         percentPanel.Controls.Add(_compressionPercentInput);
-        percentPanel.Controls.Add(new Label { Text = "%", AutoSize = true, ForeColor = Theme.Muted, Anchor = AnchorStyles.Left, Margin = new Padding(4, 6, 0, 0) });
+        percentPanel.Controls.Add(new Label { Text = "%", AutoSize = true, ForeColor = Theme.Muted, Anchor = AnchorStyles.Left, Margin = ScaleDpi(new Padding(4, 6, 0, 0)) });
         optionGrid.Controls.Add(percentPanel, 3, 2);
 
         // 行 3: [品質優先] [品質Combo] | [サイズ情報] [サイズ推移ラベル]
@@ -324,6 +333,7 @@ internal sealed class ClipEditorForm : Form
         optionGrid.Controls.Add(_outputDirectoryTextBox, 1, 4);
         optionGrid.SetColumnSpan(_outputDirectoryTextBox, 2);
         ConfigureButton(_browseButton, "参照...", Theme.SurfaceRaised);
+        _browseButton.Dock = DockStyle.Fill;
         optionGrid.Controls.Add(_browseButton, 3, 4);
 
         _commandPreviewTextBox.Dock = DockStyle.Fill;
@@ -550,7 +560,40 @@ internal sealed class ClipEditorForm : Form
         }
     }
 
-    private static void ConfigureButton(
+    private int ScaleDpi(int value)
+    {
+        return LogicalToDeviceUnits(value);
+    }
+
+    private Size ScaleDpi(Size size)
+    {
+        return new Size(ScaleDpi(size.Width), ScaleDpi(size.Height));
+    }
+
+    private Padding ScaleDpi(Padding padding)
+    {
+        return new Padding(
+            ScaleDpi(padding.Left),
+            ScaleDpi(padding.Top),
+            ScaleDpi(padding.Right),
+            ScaleDpi(padding.Bottom));
+    }
+
+    private int MeasureTextWidth(Control control, string text)
+    {
+        if (string.IsNullOrEmpty(text))
+        {
+            return 0;
+        }
+
+        return TextRenderer.MeasureText(
+            text,
+            control.Font,
+            Size.Empty,
+            TextFormatFlags.NoPadding).Width;
+    }
+
+    private void ConfigureButton(
         ModernButton button,
         string text,
         Color fillColor)
@@ -562,9 +605,12 @@ internal sealed class ClipEditorForm : Form
             ? Theme.AccentHover
             : Theme.ButtonHover;
         button.ForeColor = Theme.Text;
-        button.Width = 124;
-        button.Height = 38;
-        button.Margin = new Padding(0, 0, 8, 0);
+        button.Width = Math.Max(
+            ScaleDpi(124),
+            MeasureTextWidth(button, text) + ScaleDpi(28));
+        button.Height = ScaleDpi(38);
+        button.Padding = ScaleDpi(new Padding(10, 0, 10, 0));
+        button.Margin = ScaleDpi(new Padding(0, 0, 8, 0));
     }
 
     private static void AddLabel(

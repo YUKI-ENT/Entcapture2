@@ -78,6 +78,7 @@ public partial class SettingsForm : Form
         ConfigureSampleCoordinatePicker();
         ConfigureRsBasePatientPageOption();
         ConfigureSnapshotBestFrameOption();
+        ApplyDpiLayoutFixes();
 
         _videoCheckBox.Text = "動画ファイリング";
         _presetPreviewOnlyCheckBox.Text = "プレビューのみ";
@@ -109,6 +110,110 @@ public partial class SettingsForm : Form
             }
         }
 
+    }
+
+    private int ScaleDpi(int value)
+    {
+        return LogicalToDeviceUnits(value);
+    }
+
+    private Size ScaleDpi(Size size)
+    {
+        return new Size(ScaleDpi(size.Width), ScaleDpi(size.Height));
+    }
+
+    private Padding ScaleDpi(Padding padding)
+    {
+        return new Padding(
+            ScaleDpi(padding.Left),
+            ScaleDpi(padding.Top),
+            ScaleDpi(padding.Right),
+            ScaleDpi(padding.Bottom));
+    }
+
+    private void ApplyDpiLayoutFixes()
+    {
+        rootLayout.Padding = ScaleDpi(new Padding(18));
+        rootLayout.RowStyles[2] =
+            new RowStyle(SizeType.Absolute, ScaleDpi(54));
+        generalTabPage.Padding = ScaleDpi(new Padding(14));
+        presetsTabPage.Padding = ScaleDpi(new Padding(14));
+
+        generalPagePanel.AutoScroll = true;
+        presetEditorPanel.AutoScroll = true;
+        generalLayout.AutoSize = true;
+        generalLayout.AutoSizeMode = AutoSizeMode.GrowAndShrink;
+        generalLayout.Dock = DockStyle.Top;
+        SetAbsoluteRows(generalLayout, 24, 260, 310, 390);
+
+        ScaleCard(snapshotCardPanel, 250, new Padding(14));
+        ScaleCard(finalVideoCardPanel, 250, new Padding(14));
+        ScaleCard(temporaryCardPanel, 300, new Padding(14));
+        ScaleCard(hotkeyCardPanel, 300, new Padding(14));
+        ScaleCard(integrationCardPanel, 380, new Padding(18));
+        ScaleCard(importCardPanel, 380, new Padding(18));
+
+        SetAbsoluteRows(snapshotCardLayout, 30, 42, 42, 46, 78);
+        SetAbsoluteRows(finalVideoCardLayout, 32, 44, 44, 44, 32);
+        SetAbsoluteRows(temporaryCardLayout, 30, 42, 38, 38, 38, 38, 38, 24);
+        if (hotkeyCardLayout.RowStyles.Count >= 6)
+        {
+            SetRows(
+                hotkeyCardLayout,
+                new RowStyle(SizeType.Absolute, ScaleDpi(32)),
+                new RowStyle(SizeType.Absolute, ScaleDpi(42)),
+                new RowStyle(SizeType.Absolute, ScaleDpi(42)),
+                new RowStyle(SizeType.Absolute, ScaleDpi(42)),
+                new RowStyle(SizeType.Absolute, ScaleDpi(42)),
+                new RowStyle(SizeType.Percent, 100F));
+        }
+
+        if (integrationLayout.RowStyles.Count >= 7)
+        {
+            SetAbsoluteRows(integrationLayout, 30, 40, 40, 40, 44, 42, 92);
+        }
+
+        if (importLayout.RowStyles.Count >= 3)
+        {
+            SetAbsoluteRows(importLayout, 34, 52, 82);
+        }
+
+        _rsBasePatientPageDelayInput.Width = ScaleDpi(100);
+        _snapshotBestFrameWindowInput.Size = ScaleDpi(new Size(120, 23));
+        _settingsTransferPanel.WrapContents = false;
+        ScaleButton(_okButton, 100, 38);
+        ScaleButton(_cancelButton, 110, 38);
+        ScaleButton(_exportSettingsButton, 135, 38);
+        ScaleButton(_importSettingsButton, 135, 38);
+        ScaleButton(_importLegacyButton, 147, 38);
+    }
+
+    private void ScaleCard(Control card, int minimumHeight, Padding padding)
+    {
+        card.MinimumSize = new Size(0, ScaleDpi(minimumHeight));
+        card.Padding = ScaleDpi(padding);
+    }
+
+    private void ScaleButton(Button button, int width, int height)
+    {
+        button.Size = ScaleDpi(new Size(width, height));
+    }
+
+    private void SetAbsoluteRows(TableLayoutPanel layout, params int[] heights)
+    {
+        RowStyle[] rows = heights
+            .Select(height => new RowStyle(SizeType.Absolute, ScaleDpi(height)))
+            .ToArray();
+        SetRows(layout, rows);
+    }
+
+    private static void SetRows(TableLayoutPanel layout, params RowStyle[] rows)
+    {
+        layout.RowStyles.Clear();
+        foreach (RowStyle row in rows)
+        {
+            layout.RowStyles.Add(row);
+        }
     }
 
     private void NavigationButton_Click(object? sender, EventArgs e)

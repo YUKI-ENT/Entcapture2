@@ -20,7 +20,6 @@ public sealed class CameraCaptureService : IAsyncDisposable
     private Task? _bitmapIngestTask;
     private Task? _processingTask;
     private Task? _recordingTask;
-    private VideoCapture? _capture;
     private UsbCamera? _usbCamera;
     private Bitmap? _latestImage;
     private Mat? _latestSourceFrame;
@@ -300,36 +299,6 @@ public sealed class CameraCaptureService : IAsyncDisposable
         };
     }
 
-    private static bool TryGetFourCc(string pixelFormat, out int fourCc)
-    {
-        fourCc = 0;
-        if (string.IsNullOrWhiteSpace(pixelFormat))
-        {
-            return false;
-        }
-
-        string normalized = pixelFormat.Trim().ToUpperInvariant();
-        normalized = normalized switch
-        {
-            "RGB24" => "BGR3",
-            "RGB32" => "BGR4",
-            _ => normalized
-        };
-
-        if (normalized.Length != 4 ||
-            normalized.Any(character => character is < ' ' or > '~'))
-        {
-            return false;
-        }
-
-        fourCc = VideoWriter.FourCC(
-            normalized[0],
-            normalized[1],
-            normalized[2],
-            normalized[3]);
-        return true;
-    }
-
     public async Task StopAsync()
     {
         ENTcapture2.Core.Services.DebugLogger.Debug("CameraCaptureService.StopAsync: Stopping capture");
@@ -365,8 +334,7 @@ public sealed class CameraCaptureService : IAsyncDisposable
                 Task.Delay(TimeSpan.FromMilliseconds(1500)));
             if (!ReferenceEquals(completedTask, captureTask))
             {
-                ENTcapture2.Core.Services.DebugLogger.Warning("CameraCaptureService.StopAsync: Capture task timeout, forcing release");
-                _capture?.Release();
+                ENTcapture2.Core.Services.DebugLogger.Warning("CameraCaptureService.StopAsync: Capture task timeout");
             }
 
             await captureTask;
@@ -410,9 +378,6 @@ public sealed class CameraCaptureService : IAsyncDisposable
             _frameChannel = null;
             _recordingChannel = null;
             _recordingOptions = null;
-            _capture?.Release();
-            _capture?.Dispose();
-            _capture = null;
             lock (_imageLock)
             {
                 ClearSnapshotCandidates();
@@ -763,93 +728,6 @@ public sealed class CameraCaptureService : IAsyncDisposable
             previousReceived = receivedCount;
             previousDisplayed = displayedCount;
             previousDropped = droppedCount;
-            statisticsClock.Restart();
-        }
-    }
-
-    private async Task CaptureLoopAsync(CancellationToken cancellationToken)
-    {
-        Debug.Assert(_capture is not null);
-        Debug.Assert(_frameChannel is not null);
-
-        var statisticsClock = Stopwatch.StartNew();
-        long previousReceived = 0;
-        long previousDisplayed = 0;
-
-        while (!cancellationToken.IsCancellationRequested)
-        {
-            var frame = new Mat();
-            bool received = _capture.Read(frame);
-            if (!received || frame.Empty())
-            {
-                frame.Dispose();
-                await Task.Delay(5, cancellationToken);
-                continue;
-            }
-
-            Interlocked.Increment(ref _receivedFrames);
-            if (_retainUnprocessedSnapshot)
-            {
-                lock (_imageLock)
-                {
-                    if (_retainUnprocessedSnapshot)
-                    {
-                        Mat? previous = _latestSourceFrame;
-                        _latestSourceFrame = frame.Clone();
-                        previous?.Dispose();
-                    }
-                }
-            }
-            if (_recordingChannel is not null)
-            {
-                Mat recordingFrame = frame.Clone();
-                if (!_recordingChannel.Writer.TryWrite(recordingFrame))
-                {
-                    if (_recordingChannel.Reader.TryRead(out Mat? staleRecordingFrame))
-                    {
-                        staleRecordingFrame.Dispose();
-                        Interlocked.Increment(ref _droppedFrames);
-                    }
-
-                    if (!_recordingChannel.Writer.TryWrite(recordingFrame))
-                    {
-                        recordingFrame.Dispose();
-                        Interlocked.Increment(ref _droppedFrames);
-                    }
-                }
-            }
-
-            if (!_frameChannel.Writer.TryWrite(frame))
-            {
-                if (_frameChannel.Reader.TryRead(out Mat? staleFrame))
-                {
-                    staleFrame.Dispose();
-                    Interlocked.Increment(ref _droppedFrames);
-                }
-
-                if (!_frameChannel.Writer.TryWrite(frame))
-                {
-                    frame.Dispose();
-                    Interlocked.Increment(ref _droppedFrames);
-                }
-            }
-
-            if (statisticsClock.ElapsedMilliseconds < 1000)
-            {
-                continue;
-            }
-
-            long receivedCount = Interlocked.Read(ref _receivedFrames);
-            long displayedCount = Interlocked.Read(ref _displayedFrames);
-            double elapsedSeconds = statisticsClock.Elapsed.TotalSeconds;
-            StatisticsUpdated?.Invoke(
-                new CaptureStatistics(
-                    (receivedCount - previousReceived) / elapsedSeconds,
-                    (displayedCount - previousDisplayed) / elapsedSeconds,
-                    Interlocked.Read(ref _droppedFrames)));
-
-            previousReceived = receivedCount;
-            previousDisplayed = displayedCount;
             statisticsClock.Restart();
         }
     }

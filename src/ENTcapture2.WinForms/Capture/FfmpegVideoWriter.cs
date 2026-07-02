@@ -52,14 +52,16 @@ internal sealed class FfmpegVideoWriter : IDisposable
                 $"FFmpeg入力はBGR24が必要です。実際: {frame.Type()}");
         }
 
-        int rowBytes = checked(frame.Width * 3);
+        int frameWidth = frame.Width;
+        int frameHeight = frame.Height;
+        int rowBytes = checked(frameWidth * 3);
         if (frame.IsContinuous() && frame.Step() == rowBytes)
         {
             Marshal.Copy(frame.Data, _frameBuffer, 0, _frameBuffer.Length);
         }
         else
         {
-            for (int row = 0; row < frame.Height; row++)
+            for (int row = 0; row < frameHeight; row++)
             {
                 Marshal.Copy(
                     frame.Ptr(row),

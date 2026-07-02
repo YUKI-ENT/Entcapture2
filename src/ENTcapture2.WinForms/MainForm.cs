@@ -1711,36 +1711,6 @@ public partial class MainForm : Form
         }
     }
 
-    private async Task NotifyRsBaseAfterSnapshotAsync()
-    {
-        if (!_settings.AutoFileToRsBase)
-        {
-            return;
-        }
-
-        try
-        {
-            await _rsBaseFilingService.NotifyRsBaseAsync(
-                _settings,
-                _patientIdTextBox.Text.Trim());
-        }
-        catch (Exception exception)
-        {
-            try
-            {
-                BeginInvoke(() =>
-                {
-                    _statusLabel.Text =
-                        "●  RSBase取込通知に失敗: " + exception.Message;
-                    _statusLabel.ForeColor = Theme.Danger;
-                });
-            }
-            catch (InvalidOperationException)
-            {
-            }
-        }
-    }
-
     private string BuildTemporaryRecordingPrefix()
     {
         return BuildRsBaseFileStem(
@@ -1924,11 +1894,6 @@ public partial class MainForm : Form
         }
     }
 
-    private void MainForm_ResizeEnd(object? sender, EventArgs e)
-    {
-        SnapMainWindowToScreenEdges();
-    }
-
     protected override void WndProc(ref Message m)
     {
         if (m.Msg == WmWindowPosChanging &&
@@ -1939,23 +1904,6 @@ public partial class MainForm : Form
         }
 
         base.WndProc(ref m);
-    }
-
-    private void SnapMainWindowToScreenEdges()
-    {
-        if (WindowState != FormWindowState.Normal)
-        {
-            return;
-        }
-
-        FrameInsets insets = GetVisibleFrameInsets();
-        Rectangle snappedBounds = SnapMoveBoundsToScreenEdges(
-            Bounds,
-            insets);
-        if (snappedBounds != Bounds)
-        {
-            Bounds = snappedBounds;
-        }
     }
 
     private void SnapChangingWindowPosition(IntPtr windowPosPointer)
@@ -4993,57 +4941,6 @@ public partial class MainForm : Form
         }
     }
 
-    private static ComboBox CreateComboBox()
-    {
-        return new ComboBox
-        {
-            DropDownStyle = ComboBoxStyle.DropDownList,
-            BackColor = Theme.SurfaceRaised,
-            ForeColor = Theme.Text,
-            FlatStyle = FlatStyle.Flat,
-            Font = Theme.BodyFont(),
-            Height = 34,
-            Margin = new Padding(0, 2, 8, 2)
-        };
-    }
-
-    private static TextBox CreateTextBox()
-    {
-        return new TextBox
-        {
-            BackColor = Theme.SurfaceRaised,
-            ForeColor = Theme.Text,
-            BorderStyle = BorderStyle.FixedSingle,
-            Font = Theme.BodyFont(),
-            Margin = new Padding(4, 1, 10, 0)
-        };
-    }
-
-    private static TrackBar CreateColorTrack()
-    {
-        return new TrackBar
-        {
-            Minimum = 0,
-            Maximum = 510,
-            Value = 255,
-            TickStyle = TickStyle.None,
-            Dock = DockStyle.Fill,
-            BackColor = Theme.Surface
-        };
-    }
-
-    private static Label CreateValueLabel()
-    {
-        return new Label
-        {
-            AutoSize = false,
-            Width = 42,
-            TextAlign = ContentAlignment.MiddleRight,
-            ForeColor = Theme.Text,
-            Font = Theme.BodyFont(9)
-        };
-    }
-
     private static Label CreateCompactLabel(string text)
     {
         return new Label
@@ -5269,31 +5166,6 @@ public partial class MainForm : Form
         _settings.MainWindowTop = bounds.Top;
         _settings.MainWindowWidth = bounds.Width;
         _settings.MainWindowHeight = bounds.Height;
-    }
-
-    private void RestoreZoomWindowBounds(Form zoomForm)
-    {
-        if (_settings.ZoomWindowWidth <= 0 ||
-            _settings.ZoomWindowHeight <= 0 ||
-            _settings.ZoomWindowLeft == int.MinValue ||
-            _settings.ZoomWindowTop == int.MinValue)
-        {
-            return;
-        }
-
-        var bounds = new Rectangle(
-            _settings.ZoomWindowLeft,
-            _settings.ZoomWindowTop,
-            _settings.ZoomWindowWidth,
-            _settings.ZoomWindowHeight);
-        if (!Screen.AllScreens.Any(screen =>
-                screen.WorkingArea.IntersectsWith(bounds)))
-        {
-            return;
-        }
-
-        zoomForm.StartPosition = FormStartPosition.Manual;
-        zoomForm.Bounds = bounds;
     }
 
     private void SaveZoomWindowBounds(Form zoomForm)

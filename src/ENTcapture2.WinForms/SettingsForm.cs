@@ -150,6 +150,7 @@ public partial class SettingsForm : Form
         ScaleCard(finalVideoCardPanel, 250, new Padding(14));
         ScaleCard(temporaryCardPanel, 300, new Padding(14));
         ScaleCard(hotkeyCardPanel, 300, new Padding(14));
+        ScaleCard(roiCardPanel, 480, new Padding(14));
         ScaleCard(integrationCardPanel, 380, new Padding(18));
         ScaleCard(importCardPanel, 380, new Padding(18));
 
@@ -181,6 +182,16 @@ public partial class SettingsForm : Form
         _rsBasePatientPageDelayInput.Width = ScaleDpi(100);
         _snapshotBestFrameWindowInput.Size = ScaleDpi(new Size(120, 23));
         _settingsTransferPanel.WrapContents = false;
+        if (editorLayout.RowStyles.Count > 9)
+        {
+            editorLayout.RowStyles[6] =
+                new RowStyle(SizeType.Absolute, ScaleDpi(480));
+            editorLayout.RowStyles[8] =
+                new RowStyle(SizeType.Absolute, ScaleDpi(220));
+            editorLayout.RowStyles[9] =
+                new RowStyle(SizeType.Absolute, ScaleDpi(82));
+        }
+
         ScaleButton(_okButton, 100, 38);
         ScaleButton(_cancelButton, 110, 38);
         ScaleButton(_exportSettingsButton, 135, 38);
@@ -244,14 +255,19 @@ public partial class SettingsForm : Form
             return;
         }
 
-        roiCardPanel.Height = Math.Max(roiCardPanel.Height, ScaleDpi(360));
-        roiCardPanel.MinimumSize = new Size(0, ScaleDpi(360));
-        if (roiLayout.RowStyles.Count >= 3)
-        {
-            roiLayout.RowStyles[2] = new RowStyle(
-                SizeType.Absolute,
-                ScaleDpi(236));
-        }
+        roiCardPanel.Height = Math.Max(roiCardPanel.Height, ScaleDpi(480));
+        roiCardPanel.MinimumSize = new Size(0, ScaleDpi(480));
+        roiFlowPanel.Controls.Remove(roiHintLabel);
+        roiLayout.RowCount = 4;
+        roiLayout.RowStyles.Clear();
+        roiLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, ScaleDpi(32)));
+        roiLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, ScaleDpi(44)));
+        roiLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, ScaleDpi(48)));
+        roiLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+        roiHintLabel.AutoSize = false;
+        roiHintLabel.Dock = DockStyle.Fill;
+        roiHintLabel.TextAlign = ContentAlignment.MiddleLeft;
+        roiLayout.Controls.Add(roiHintLabel, 0, 2);
 
         var sampleLayout = new TableLayoutPanel
         {
@@ -264,7 +280,7 @@ public partial class SettingsForm : Form
         sampleLayout.ColumnStyles.Add(
             new ColumnStyle(SizeType.Percent, 100F));
         sampleLayout.ColumnStyles.Add(
-            new ColumnStyle(SizeType.Absolute, ScaleDpi(170)));
+            new ColumnStyle(SizeType.Absolute, ScaleDpi(220)));
         sampleLayout.RowStyles.Add(
             new RowStyle(SizeType.Percent, 100F));
 
@@ -280,7 +296,7 @@ public partial class SettingsForm : Form
         var sidePanel = new TableLayoutPanel
         {
             ColumnCount = 2,
-            Dock = DockStyle.Top,
+            Dock = DockStyle.Fill,
             Margin = ScaleDpi(new Padding(12, 0, 0, 0)),
             RowCount = 5,
             Tag = "raised"
@@ -295,9 +311,9 @@ public partial class SettingsForm : Form
         sidePanel.RowStyles.Add(
             new RowStyle(SizeType.Absolute, ScaleDpi(34)));
         sidePanel.RowStyles.Add(
-            new RowStyle(SizeType.Absolute, ScaleDpi(48)));
+            new RowStyle(SizeType.Absolute, ScaleDpi(70)));
         sidePanel.RowStyles.Add(
-            new RowStyle(SizeType.Absolute, ScaleDpi(60)));
+            new RowStyle(SizeType.Percent, 100F));
 
         _sampleLoadButton.Dock = DockStyle.Fill;
         _sampleLoadButton.MinimumSize = ScaleDpi(new Size(0, 30));
@@ -346,7 +362,7 @@ public partial class SettingsForm : Form
         sidePanel.Controls.Add(hintLabel, 0, 4);
         sampleLayout.Controls.Add(sidePanel, 1, 0);
 
-        roiLayout.Controls.Add(sampleLayout, 0, 2);
+        roiLayout.Controls.Add(sampleLayout, 0, 3);
         Theme.Apply(sampleLayout);
     }
 

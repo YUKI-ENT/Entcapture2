@@ -134,6 +134,10 @@ internal static class FfmpegRuntime
             "-an",
             "-c:v", encoder);
         AddEncoderArguments(process.StartInfo.ArgumentList, encoder);
+        Add(
+            process.StartInfo.ArgumentList,
+            "-pix_fmt",
+            GetOutputPixelFormat(encoder));
         Add(process.StartInfo.ArgumentList, "-f", "null", "NUL");
 
         try
@@ -221,11 +225,31 @@ internal static class FfmpegRuntime
         }
     }
 
+    public static string GetOutputPixelFormat(string encoder)
+    {
+        return encoder switch
+        {
+            "mjpeg" => "yuvj420p",
+            "h264_qsv" => "nv12",
+            _ => "yuv420p"
+        };
+    }
+
     public static string SummarizeError(string error, string fallback)
     {
         string[] lines = error
             .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries);
-        return lines.LastOrDefault()?.Trim() ?? fallback;
+        if (lines.Length == 0)
+        {
+            return fallback;
+        }
+
+        return string.Join(
+            " | ",
+            lines
+                .Select(line => line.Trim())
+                .Where(line => line.Length > 0)
+                .TakeLast(6));
     }
 
     public static void Add(

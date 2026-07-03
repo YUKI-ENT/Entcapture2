@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.Diagnostics;
+using System.Globalization;
 using System.Runtime.InteropServices;
 using OpenCvSharp;
 using CvSize = OpenCvSharp.Size;
@@ -17,7 +18,8 @@ internal sealed class FfmpegVideoWriter : IDisposable
     public FfmpegVideoWriter(
         string path,
         CvSize frameSize,
-        FfmpegEncoderSelection encoder)
+        FfmpegEncoderSelection encoder,
+        double framesPerSecond)
     {
         Encoder = encoder;
         _frameBuffer = new byte[checked(
@@ -25,7 +27,12 @@ internal sealed class FfmpegVideoWriter : IDisposable
 
         ProcessStartInfo startInfo = FfmpegRuntime.CreateStartInfo();
         startInfo.RedirectStandardInput = true;
-        AddArguments(startInfo.ArgumentList, path, frameSize, encoder);
+        AddArguments(
+            startInfo.ArgumentList,
+            path,
+            frameSize,
+            encoder,
+            framesPerSecond);
 
         _process = new Process { StartInfo = startInfo };
         try
@@ -71,7 +78,14 @@ internal sealed class FfmpegVideoWriter : IDisposable
             }
         }
 
-        _input.Write(_frameBuffer);
+        try
+        {
+            _input.Write(_frameBuffer);
+        }
+        catch (IOException exception)
+        {
+            throw CreateWriteFailure(exception);
+        }
     }
 
     public void Dispose()
@@ -124,8 +138,10 @@ internal sealed class FfmpegVideoWriter : IDisposable
         Collection<string> arguments,
         string path,
         CvSize frameSize,
-        FfmpegEncoderSelection encoder)
+        FfmpegEncoderSelection encoder,
+        double framesPerSecond)
     {
+        string frameRate = NormalizeFrameRate(framesPerSecond);
         Add(arguments,
             "-hide_banner",
             "-loglevel", "warning",
@@ -135,13 +151,13 @@ internal sealed class FfmpegVideoWriter : IDisposable
             "-f", "rawvideo",
             "-pixel_format", "bgr24",
             "-video_size", $"{frameSize.Width}x{frameSize.Height}",
-            "-framerate", "1000",
+            "-framerate", frameRate,
             "-i", "pipe:0",
             "-an",
             "-c:v", encoder.EncoderName);
         FfmpegRuntime.AddEncoderArguments(arguments, encoder.EncoderName);
         string pixelFormat =
-            encoder.EncoderName == "mjpeg" ? "yuvj420p" : "yuv420p";
+            FfmpegRuntime.GetOutputPixelFormat(encoder.EncoderName);
         Add(arguments,
             "-pix_fmt", pixelFormat,
             "-fps_mode", "vfr",
@@ -152,6 +168,15 @@ internal sealed class FfmpegVideoWriter : IDisposable
             path);
     }
 
+    private static string NormalizeFrameRate(double framesPerSecond)
+    {
+        double fps = double.IsFinite(framesPerSecond) && framesPerSecond > 0
+            ? framesPerSecond
+            : 30;
+        fps = Math.Clamp(fps, 1, 240);
+        return fps.ToString("0.###", CultureInfo.InvariantCulture);
+    }
+
     private static void Add(
         Collection<string> arguments,
         params string[] values)
@@ -160,5 +185,37 @@ internal sealed class FfmpegVideoWriter : IDisposable
         {
             arguments.Add(value);
         }
+    }
+
+    private InvalidOperationException CreateWriteFailure(IOException exception)
+    {
+        string error = string.Empty;
+        if (_process.HasExited || _errorTask.IsCompleted)
+        {
+            try
+            {
+                error = _errorTask.GetAwaiter().GetResult();
+            }
+            catch
+            {
+                error = string.Empty;
+            }
+        }
+
+        string message = "FFmpeg録画プロセスへの書き込みに失敗しました。";
+        if (_process.HasExited)
+        {
+            message += $" ExitCode={_process.ExitCode}.";
+        }
+
+        if (!string.IsNullOrWhiteSpace(error))
+        {
+            message += " " +
+                FfmpegRuntime.SummarizeError(
+                    error,
+                    "FFmpegの詳細エラーを取得できませんでした。");
+        }
+
+        return new InvalidOperationException(message, exception);
     }
 }

@@ -55,6 +55,7 @@ public partial class MainForm : Form
     private readonly RsBaseFilingService _rsBaseFilingService = new();
     private readonly PatientMetadataStore _metadataStore = new();
     private readonly FlowLayoutPanel _sourceHeaderPanel = new();
+    private readonly ModernButton _openLogFileButton = new();
     private readonly ModernButton _toggleSidePanelButton = new();
     private readonly ModernButton _openSnapshotFolderButton = new();
     private readonly ModernButton _rsBaseImportButton = new();
@@ -297,6 +298,14 @@ public partial class MainForm : Form
         _refreshDevicesButton.Size = ScaleDpi(new Size(82, 24));
         SetButtonWidthForText(_refreshDevicesButton, 82);
         _refreshDevicesButton.Margin = ScaleDpi(new Padding(0, 1, 0, 0));
+        ConfigureModernButton(
+            _openLogFileButton,
+            "ログ",
+            Theme.SurfaceRaised);
+        _openLogFileButton.MinimumSize = ScaleDpi(new Size(58, 24));
+        _openLogFileButton.Size = ScaleDpi(new Size(58, 24));
+        SetButtonWidthForText(_openLogFileButton, 58);
+        _openLogFileButton.Margin = ScaleDpi(new Padding(6, 1, 0, 0));
         _toggleSidePanelButton.Text = "＜ 補正";
         _toggleSidePanelButton.FillColor = Theme.SurfaceRaised;
         _toggleSidePanelButton.BackColor = Theme.SurfaceRaised;
@@ -448,6 +457,7 @@ public partial class MainForm : Form
         _sourceHeaderPanel.Controls.Add(resolutionLabel);
         _sourceHeaderPanel.Controls.Add(_resolutionComboBox);
         _sourceHeaderPanel.Controls.Add(_refreshDevicesButton);
+        _sourceHeaderPanel.Controls.Add(_openLogFileButton);
 
         headerLayout.Controls.Remove(patientPanel);
         headerLayout.Controls.Remove(primaryActionPanel);
@@ -1113,6 +1123,7 @@ public partial class MainForm : Form
         _startButton.Click += StartButton_Click;
         _snapshotButton.Click += SnapshotButton_Click;
         _refreshDevicesButton.Click += async (_, _) => await RefreshDevicesAsync();
+        _openLogFileButton.Click += OpenLogFileButton_Click;
         _managePresetsButton.Click += ManagePresetsButton_Click;
         _openPlaybackButton.Click += OpenPlaybackButton_Click;
         _toggleSidePanelButton.Click +=
@@ -2829,9 +2840,29 @@ public partial class MainForm : Form
             workspaceLayout.ResumeLayout(true);
         }
 
+        _toggleSidePanelButton.Visible = true;
+        _toggleSidePanelButton.BringToFront();
+        workspaceLayout.PerformLayout();
+        _toggleSidePanelButton.Invalidate();
+        _toggleSidePanelButton.Update();
+        PreviewSurfacePanel_Resize(this, EventArgs.Empty);
+
         if (show)
         {
             ForceRedrawSidePanel();
+        }
+        else
+        {
+            ForceRedrawControlTree(_toggleSidePanelButton);
+            if (IsHandleCreated)
+            {
+                BeginInvoke((Action)(() =>
+                {
+                    _toggleSidePanelButton.Visible = true;
+                    _toggleSidePanelButton.BringToFront();
+                    ForceRedrawControlTree(_toggleSidePanelButton);
+                }));
+            }
         }
 
         if (!show)
@@ -3482,22 +3513,50 @@ public partial class MainForm : Form
         {
             BeginInvoke(() =>
             {
-                _fpsLabel.Text =
-                    $"INPUT {statistics.InputFramesPerSecond:0.0} fps  /  " +
-                    $"PREVIEW {statistics.PreviewFramesPerSecond:0.0} fps  /  " +
-                    $"DROP {statistics.DroppedFrames}" +
-                    (_recordingClock.IsRunning
-                        ? $"  /  REC {FormatElapsed(_recordingClock.Elapsed)}" +
-                          (!string.IsNullOrWhiteSpace(
-                              _cameraService.LastRecordingEncoder)
-                              ? $"  /  ENC {_cameraService.LastRecordingEncoder}"
-                              : string.Empty)
-                        : string.Empty);
+                _fpsLabel.Text = BuildCaptureStatusText(statistics);
             });
         }
         catch (InvalidOperationException)
         {
         }
+    }
+
+    private string BuildCaptureStatusText(CaptureStatistics statistics)
+    {
+        string text =
+            $"IN {statistics.InputFramesPerSecond:0.0} fps / " +
+            $"PRV {statistics.PreviewFramesPerSecond:0.0} fps / " +
+            $"DROP {statistics.DroppedFrames}";
+
+        if (!_recordingClock.IsRunning)
+        {
+            return text;
+        }
+
+        text += $" / REC {FormatElapsed(_recordingClock.Elapsed)}";
+        string encoder = FormatEncoderLabel(_cameraService.LastRecordingEncoder);
+        return string.IsNullOrWhiteSpace(encoder)
+            ? text
+            : $"{text} / {encoder}";
+    }
+
+    private static string FormatEncoderLabel(string? encoder)
+    {
+        if (string.IsNullOrWhiteSpace(encoder))
+        {
+            return string.Empty;
+        }
+
+        return encoder.Trim() switch
+        {
+            "Intel Quick Sync" => "QSV",
+            "NVIDIA NVENC" => "NVENC",
+            "AMD AMF" => "AMF",
+            "Media Foundation" => "MF",
+            "OpenH264 (CPU)" => "OpenH264",
+            "FFmpeg MJPEG" => "MJPEG",
+            string value => value
+        };
     }
 
     private static string FormatElapsed(TimeSpan value)
@@ -3988,6 +4047,35 @@ public partial class MainForm : Form
             OutputDirectoryHasMediaFiles();
         EnsureThumbnailFixedControls();
         PositionThumbnailActionButtons();
+    }
+
+    private void OpenLogFileButton_Click(object? sender, EventArgs e)
+    {
+        try
+        {
+            DebugLogger.Info("OpenLogFileButton_Click: Opening log file");
+            string logFile = DebugLogger.GetCurrentLogFilePath();
+            string? directory = Path.GetDirectoryName(logFile);
+            if (!string.IsNullOrWhiteSpace(directory))
+            {
+                Directory.CreateDirectory(directory);
+            }
+
+            if (!File.Exists(logFile))
+            {
+                File.WriteAllText(logFile, string.Empty);
+            }
+
+            Process.Start(
+                new ProcessStartInfo(logFile)
+                {
+                    UseShellExecute = true
+                });
+        }
+        catch (Exception exception)
+        {
+            ShowError("ログファイルを開けませんでした。", exception);
+        }
     }
 
     private void OpenSnapshotFolderButton_Click(object? sender, EventArgs e)

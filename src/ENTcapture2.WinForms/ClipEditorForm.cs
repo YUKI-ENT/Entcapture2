@@ -119,14 +119,13 @@ internal sealed class ClipEditorForm : Form
         {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
-            RowCount = 3,
+            RowCount = 2,
             BackColor = Theme.Surface,
             Padding = ScaleDpi(new Padding(10)),
             Margin = ScaleDpi(new Padding(0, 10, 0, 8))
         };
         previewPanel.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
-        previewPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, ScaleDpi(18)));
-        previewPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, ScaleDpi(34)));
+        previewPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, ScaleDpi(52)));
         _previewBox.Dock = DockStyle.Fill;
         _previewBox.BackColor = Color.Black;
         _previewBox.SizeMode = PictureBoxSizeMode.Zoom;
@@ -135,34 +134,32 @@ internal sealed class ClipEditorForm : Form
         _playbackTrackBar.Dock = DockStyle.Fill;
         _playbackTrackBar.Maximum = 1000;
         _playbackTrackBar.TickStyle = TickStyle.None;
-        _positionLabel.Dock = DockStyle.Right;
-        _positionLabel.Width = ScaleDpi(260);
+        int timeColumnWidth = GetTimeColumnWidth();
+        _positionLabel.AutoSize = false;
+        _positionLabel.Dock = DockStyle.Fill;
+        _positionLabel.Width = timeColumnWidth;
         _positionLabel.ForeColor = Theme.Muted;
+        _positionLabel.Padding = ScaleDpi(new Padding(8, 0, 4, 0));
         _positionLabel.TextAlign = ContentAlignment.MiddleRight;
-        var sliderPanel = new TableLayoutPanel
+        var transportPanel = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
             ColumnCount = 2,
-            RowCount = 1
+            RowCount = 2
         };
-        var rangeBarPanel = new TableLayoutPanel
-        {
-            Dock = DockStyle.Fill,
-            ColumnCount = 2,
-            RowCount = 1
-        };
-        sliderPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-        sliderPanel.ColumnStyles.Add(
-            new ColumnStyle(SizeType.Absolute, ScaleDpi(270)));
-        rangeBarPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-        rangeBarPanel.ColumnStyles.Add(
-            new ColumnStyle(SizeType.Absolute, ScaleDpi(270)));
-        sliderPanel.Controls.Add(_playbackTrackBar, 0, 0);
-        sliderPanel.Controls.Add(_positionLabel, 1, 0);
-        rangeBarPanel.Controls.Add(_rangeBar, 0, 0);
+        transportPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+        transportPanel.ColumnStyles.Add(
+            new ColumnStyle(SizeType.Absolute, timeColumnWidth));
+        transportPanel.RowStyles.Add(
+            new RowStyle(SizeType.Absolute, ScaleDpi(18)));
+        transportPanel.RowStyles.Add(
+            new RowStyle(SizeType.Absolute, ScaleDpi(34)));
+        transportPanel.Controls.Add(_rangeBar, 0, 0);
+        transportPanel.Controls.Add(_playbackTrackBar, 0, 1);
+        transportPanel.Controls.Add(_positionLabel, 1, 0);
+        transportPanel.SetRowSpan(_positionLabel, 2);
         previewPanel.Controls.Add(_previewBox, 0, 0);
-        previewPanel.Controls.Add(rangeBarPanel, 0, 1);
-        previewPanel.Controls.Add(sliderPanel, 0, 2);
+        previewPanel.Controls.Add(transportPanel, 0, 1);
         root.Controls.Add(previewPanel, 0, 1);
 
         var rangeButtons = new FlowLayoutPanel
@@ -212,24 +209,39 @@ internal sealed class ClipEditorForm : Form
             Dock = DockStyle.Top,
             ColumnCount = 4,
             RowCount = 5,
-            Margin = ScaleDpi(new Padding(0, 12, 0, 8))
+            Margin = ScaleDpi(new Padding(0, 16, 0, 10))
         };
         optionGrid.ColumnStyles.Add(
-            new ColumnStyle(SizeType.Absolute, ScaleDpi(180)));
+            new ColumnStyle(SizeType.Absolute, ScaleDpi(190)));
         optionGrid.ColumnStyles.Add(
-            new ColumnStyle(SizeType.Absolute, ScaleDpi(260)));
+            new ColumnStyle(SizeType.Absolute, ScaleDpi(300)));
         optionGrid.ColumnStyles.Add(
-            new ColumnStyle(SizeType.Absolute, ScaleDpi(170)));
+            new ColumnStyle(SizeType.Absolute, ScaleDpi(190)));
         optionGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+        optionGrid.RowStyles.Add(new RowStyle(SizeType.Absolute, ScaleDpi(46)));
+        optionGrid.RowStyles.Add(new RowStyle(SizeType.Absolute, ScaleDpi(40)));
+        optionGrid.RowStyles.Add(new RowStyle(SizeType.Absolute, ScaleDpi(40)));
+        optionGrid.RowStyles.Add(new RowStyle(SizeType.Absolute, ScaleDpi(40)));
+        optionGrid.RowStyles.Add(new RowStyle(SizeType.Absolute, ScaleDpi(46)));
         root.Controls.Add(optionGrid, 0, 4);
 
         AddLabel(optionGrid, "出力形式", 0, 0);
         _joinedRadioButton.Text = "連結して1本";
         _joinedRadioButton.Checked = true;
         _joinedRadioButton.ForeColor = Theme.Text;
+        _joinedRadioButton.AutoSize = true;
+        _joinedRadioButton.Margin = ScaleDpi(new Padding(0, 8, 18, 0));
         _separateRadioButton.Text = "個別クリップ";
         _separateRadioButton.ForeColor = Theme.Text;
-        var modePanel = new FlowLayoutPanel { AutoSize = true };
+        _separateRadioButton.AutoSize = true;
+        _separateRadioButton.Margin = ScaleDpi(new Padding(0, 8, 0, 0));
+        var modePanel = new FlowLayoutPanel
+        {
+            AutoSize = false,
+            Dock = DockStyle.Fill,
+            Margin = Padding.Empty,
+            WrapContents = false
+        };
         modePanel.Controls.Add(_joinedRadioButton);
         modePanel.Controls.Add(_separateRadioButton);
         optionGrid.Controls.Add(modePanel, 1, 0);
@@ -240,6 +252,7 @@ internal sealed class ClipEditorForm : Form
         _encoderComboBox.BackColor = Theme.SurfaceRaised;
         _encoderComboBox.ForeColor = Theme.Text;
         _encoderComboBox.FlatStyle = FlatStyle.Flat;
+        _encoderComboBox.Dock = DockStyle.Fill;
         _encoderComboBox.Items.AddRange(
             [
                 new EncoderChoice("コピー（無劣化・高速）", string.Empty, false),
@@ -259,6 +272,7 @@ internal sealed class ClipEditorForm : Form
         _deinterlaceComboBox.BackColor = Theme.SurfaceRaised;
         _deinterlaceComboBox.ForeColor = Theme.Text;
         _deinterlaceComboBox.FlatStyle = FlatStyle.Flat;
+        _deinterlaceComboBox.Dock = DockStyle.Fill;
         _deinterlaceComboBox.Items.AddRange(
             [
                 new DeinterlaceChoice("なし", string.Empty),
@@ -314,6 +328,7 @@ internal sealed class ClipEditorForm : Form
         _qualityComboBox.BackColor = Theme.SurfaceRaised;
         _qualityComboBox.ForeColor = Theme.Text;
         _qualityComboBox.FlatStyle = FlatStyle.Flat;
+        _qualityComboBox.Dock = DockStyle.Fill;
         _qualityComboBox.Items.AddRange(
             ["サイズ優先", "標準", "高品質", "最高品質"]);
         _qualityComboBox.Text = ToFinalVideoQualityDisplayName(defaultQuality);
@@ -331,12 +346,25 @@ internal sealed class ClipEditorForm : Form
         _outputDirectoryTextBox.BackColor = Theme.SurfaceRaised;
         _outputDirectoryTextBox.ForeColor = Theme.Text;
         _outputDirectoryTextBox.BorderStyle = BorderStyle.FixedSingle;
+        var outputPanel = new TableLayoutPanel
+        {
+            ColumnCount = 2,
+            Dock = DockStyle.Fill,
+            Margin = Padding.Empty,
+            RowCount = 1
+        };
+        outputPanel.ColumnStyles.Add(
+            new ColumnStyle(SizeType.Percent, 100F));
+        outputPanel.ColumnStyles.Add(
+            new ColumnStyle(SizeType.Absolute, ScaleDpi(112)));
         _outputDirectoryTextBox.Dock = DockStyle.Fill;
-        optionGrid.Controls.Add(_outputDirectoryTextBox, 1, 4);
-        optionGrid.SetColumnSpan(_outputDirectoryTextBox, 2);
+        outputPanel.Controls.Add(_outputDirectoryTextBox, 0, 0);
         ConfigureButton(_browseButton, "参照...", Theme.SurfaceRaised);
         _browseButton.Dock = DockStyle.Fill;
-        optionGrid.Controls.Add(_browseButton, 3, 4);
+        _browseButton.Margin = ScaleDpi(new Padding(8, 0, 0, 0));
+        outputPanel.Controls.Add(_browseButton, 1, 0);
+        optionGrid.Controls.Add(outputPanel, 1, 4);
+        optionGrid.SetColumnSpan(outputPanel, 3);
 
         _commandPreviewTextBox.Dock = DockStyle.Fill;
         _commandPreviewTextBox.Multiline = true;
@@ -593,6 +621,16 @@ internal sealed class ClipEditorForm : Form
             control.Font,
             Size.Empty,
             TextFormatFlags.NoPadding).Width;
+    }
+
+    private int GetTimeColumnWidth()
+    {
+        int measuredWidth = TextRenderer.MeasureText(
+            "00:00:00.000 / 00:00:00.000",
+            Font,
+            Size.Empty,
+            TextFormatFlags.NoPadding).Width;
+        return Math.Max(ScaleDpi(260), measuredWidth + ScaleDpi(20));
     }
 
     private void ConfigureButton(
@@ -887,8 +925,8 @@ internal sealed class ClipEditorForm : Form
         var choice = (EncoderChoice?)_encoderComboBox.SelectedItem;
         bool canConfigureReencode = choice?.Reencode == true;
         _deinterlaceComboBox.Enabled = canConfigureReencode;
-        _qualityModeRadioButton.Enabled = true;
-        _bitrateModeRadioButton.Enabled = true;
+        _qualityModeRadioButton.Enabled = canConfigureReencode;
+        _bitrateModeRadioButton.Enabled = canConfigureReencode;
         _qualityComboBox.Enabled =
             canConfigureReencode && _qualityModeRadioButton.Checked;
         _bitrateInput.Enabled =

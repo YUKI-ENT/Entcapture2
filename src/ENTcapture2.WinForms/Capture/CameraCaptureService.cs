@@ -871,7 +871,8 @@ public sealed class CameraCaptureService : IAsyncDisposable
                             ffmpegWriter = new FfmpegVideoWriter(
                                 path,
                                 processed.Size(),
-                                ffmpegEncoder);
+                                ffmpegEncoder,
+                                options.FramesPerSecond);
                             LastRecordingEncoder =
                                 ffmpegEncoder.DisplayName;
                         }

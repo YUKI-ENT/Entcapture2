@@ -296,12 +296,10 @@ internal sealed class ClipExportService
             AddQualityArguments(arguments, encoder, options.Quality);
         }
 
-        string pixelFormat = encoder.Equals(
-            "mjpeg",
-            StringComparison.OrdinalIgnoreCase)
-                ? "yuvj420p"
-                : "yuv420p";
-        FfmpegRuntime.Add(arguments, "-pix_fmt", pixelFormat);
+        FfmpegRuntime.Add(
+            arguments,
+            "-pix_fmt",
+            FfmpegRuntime.GetOutputPixelFormat(encoder));
         FfmpegRuntime.AddEncoderArguments(
             arguments,
             encoder,

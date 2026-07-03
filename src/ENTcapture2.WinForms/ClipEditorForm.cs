@@ -136,7 +136,7 @@ internal sealed class ClipEditorForm : Form
         _playbackTrackBar.Maximum = 1000;
         _playbackTrackBar.TickStyle = TickStyle.None;
         _positionLabel.Dock = DockStyle.Right;
-        _positionLabel.Width = ScaleDpi(170);
+        _positionLabel.Width = ScaleDpi(260);
         _positionLabel.ForeColor = Theme.Muted;
         _positionLabel.TextAlign = ContentAlignment.MiddleRight;
         var sliderPanel = new TableLayoutPanel
@@ -153,10 +153,10 @@ internal sealed class ClipEditorForm : Form
         };
         sliderPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
         sliderPanel.ColumnStyles.Add(
-            new ColumnStyle(SizeType.Absolute, ScaleDpi(180)));
+            new ColumnStyle(SizeType.Absolute, ScaleDpi(270)));
         rangeBarPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
         rangeBarPanel.ColumnStyles.Add(
-            new ColumnStyle(SizeType.Absolute, ScaleDpi(180)));
+            new ColumnStyle(SizeType.Absolute, ScaleDpi(270)));
         sliderPanel.Controls.Add(_playbackTrackBar, 0, 0);
         sliderPanel.Controls.Add(_positionLabel, 1, 0);
         rangeBarPanel.Controls.Add(_rangeBar, 0, 0);
@@ -215,11 +215,11 @@ internal sealed class ClipEditorForm : Form
             Margin = ScaleDpi(new Padding(0, 12, 0, 8))
         };
         optionGrid.ColumnStyles.Add(
-            new ColumnStyle(SizeType.Absolute, ScaleDpi(150)));
+            new ColumnStyle(SizeType.Absolute, ScaleDpi(180)));
         optionGrid.ColumnStyles.Add(
-            new ColumnStyle(SizeType.Absolute, ScaleDpi(240)));
+            new ColumnStyle(SizeType.Absolute, ScaleDpi(260)));
         optionGrid.ColumnStyles.Add(
-            new ColumnStyle(SizeType.Absolute, ScaleDpi(150)));
+            new ColumnStyle(SizeType.Absolute, ScaleDpi(170)));
         optionGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
         root.Controls.Add(optionGrid, 0, 4);
 
@@ -272,7 +272,8 @@ internal sealed class ClipEditorForm : Form
         _bitrateModeRadioButton.Text = "ビットレート指定";
         _bitrateModeRadioButton.Checked = true;
         _bitrateModeRadioButton.ForeColor = Theme.Text;
-        _bitrateModeRadioButton.AutoSize = true;
+        _bitrateModeRadioButton.AutoSize = false;
+        _bitrateModeRadioButton.Dock = DockStyle.Fill;
         optionGrid.Controls.Add(_bitrateModeRadioButton, 0, 2);
 
         _bitrateInput.Minimum = 500;
@@ -305,7 +306,8 @@ internal sealed class ClipEditorForm : Form
         _qualityModeRadioButton.Text = "品質優先";
         _qualityModeRadioButton.Checked = false;
         _qualityModeRadioButton.ForeColor = Theme.Text;
-        _qualityModeRadioButton.AutoSize = true;
+        _qualityModeRadioButton.AutoSize = false;
+        _qualityModeRadioButton.Dock = DockStyle.Fill;
         optionGrid.Controls.Add(_qualityModeRadioButton, 0, 3);
 
         _qualityComboBox.DropDownStyle = ComboBoxStyle.DropDownList;
@@ -885,8 +887,8 @@ internal sealed class ClipEditorForm : Form
         var choice = (EncoderChoice?)_encoderComboBox.SelectedItem;
         bool canConfigureReencode = choice?.Reencode == true;
         _deinterlaceComboBox.Enabled = canConfigureReencode;
-        _qualityModeRadioButton.Enabled = canConfigureReencode;
-        _bitrateModeRadioButton.Enabled = canConfigureReencode;
+        _qualityModeRadioButton.Enabled = true;
+        _bitrateModeRadioButton.Enabled = true;
         _qualityComboBox.Enabled =
             canConfigureReencode && _qualityModeRadioButton.Checked;
         _bitrateInput.Enabled =

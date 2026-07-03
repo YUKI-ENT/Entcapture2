@@ -244,11 +244,13 @@ public partial class SettingsForm : Form
             return;
         }
 
-        roiCardPanel.Height = Math.Max(roiCardPanel.Height, 360);
-        roiCardPanel.MinimumSize = new Size(0, 360);
+        roiCardPanel.Height = Math.Max(roiCardPanel.Height, ScaleDpi(360));
+        roiCardPanel.MinimumSize = new Size(0, ScaleDpi(360));
         if (roiLayout.RowStyles.Count >= 3)
         {
-            roiLayout.RowStyles[2] = new RowStyle(SizeType.Absolute, 236F);
+            roiLayout.RowStyles[2] = new RowStyle(
+                SizeType.Absolute,
+                ScaleDpi(236));
         }
 
         var sampleLayout = new TableLayoutPanel
@@ -262,7 +264,7 @@ public partial class SettingsForm : Form
         sampleLayout.ColumnStyles.Add(
             new ColumnStyle(SizeType.Percent, 100F));
         sampleLayout.ColumnStyles.Add(
-            new ColumnStyle(SizeType.Absolute, 190F));
+            new ColumnStyle(SizeType.Absolute, ScaleDpi(170)));
         sampleLayout.RowStyles.Add(
             new RowStyle(SizeType.Percent, 100F));
 
@@ -279,19 +281,26 @@ public partial class SettingsForm : Form
         {
             ColumnCount = 2,
             Dock = DockStyle.Top,
-            Margin = new Padding(12, 0, 0, 0),
+            Margin = ScaleDpi(new Padding(12, 0, 0, 0)),
             RowCount = 5,
             Tag = "raised"
         };
-        sidePanel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 32F));
+        sidePanel.ColumnStyles.Add(
+            new ColumnStyle(SizeType.Absolute, ScaleDpi(28)));
         sidePanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-        sidePanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 34F));
-        sidePanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 34F));
-        sidePanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 34F));
-        sidePanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 48F));
-        sidePanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 60F));
+        sidePanel.RowStyles.Add(
+            new RowStyle(SizeType.Absolute, ScaleDpi(34)));
+        sidePanel.RowStyles.Add(
+            new RowStyle(SizeType.Absolute, ScaleDpi(34)));
+        sidePanel.RowStyles.Add(
+            new RowStyle(SizeType.Absolute, ScaleDpi(34)));
+        sidePanel.RowStyles.Add(
+            new RowStyle(SizeType.Absolute, ScaleDpi(48)));
+        sidePanel.RowStyles.Add(
+            new RowStyle(SizeType.Absolute, ScaleDpi(60)));
 
         _sampleLoadButton.Dock = DockStyle.Fill;
+        _sampleLoadButton.MinimumSize = ScaleDpi(new Size(0, 30));
         _sampleLoadButton.Text = "サンプル読込";
         _sampleLoadButton.Click += SampleLoadButton_Click;
         sidePanel.SetColumnSpan(_sampleLoadButton, 2);

@@ -23,6 +23,12 @@ public partial class MainForm : Form
     private const int SwpNoSize = 0x0001;
     private const int SwpNoMove = 0x0002;
     private const int DwmwaExtendedFrameBounds = 9;
+    private const uint RdwInvalidate = 0x0001;
+    private const uint RdwInternalPaint = 0x0002;
+    private const uint RdwErase = 0x0004;
+    private const uint RdwFrame = 0x0400;
+    private const uint RdwAllChildren = 0x0080;
+    private const uint RdwUpdateNow = 0x0100;
     private const int SidePanelBaseWidth = 310;
     private const int SideCardBaseWidth = 294;
     private const int SideToggleBaseWidth = 40;
@@ -139,6 +145,13 @@ public partial class MainForm : Form
         int dwAttribute,
         out NativeRect pvAttribute,
         int cbAttribute);
+
+    [DllImport("user32.dll")]
+    private static extern bool RedrawWindow(
+        IntPtr hwnd,
+        IntPtr lprcUpdate,
+        IntPtr hrgnUpdate,
+        uint flags);
 
     public MainForm()
         : this(new JsonSettingsStore())
@@ -403,6 +416,7 @@ public partial class MainForm : Form
         sourceCard.Visible = false;
         sidePanel.Visible = false;
         workspaceLayout.ColumnStyles[2].Width = 0;
+        EnableDoubleBufferingForPanelTree(this);
         PreviewSurfacePanel_Resize(this, EventArgs.Empty);
     }
 
@@ -2815,6 +2829,11 @@ public partial class MainForm : Form
             workspaceLayout.ResumeLayout(true);
         }
 
+        if (show)
+        {
+            ForceRedrawSidePanel();
+        }
+
         if (!show)
         {
             if (_whiteBalanceSelectionCheckBox.Checked)
@@ -2824,6 +2843,64 @@ public partial class MainForm : Form
 
             // 再生時にプリセット保存されると困るので
             //await SaveSelectedPresetAsync();
+        }
+    }
+
+    private void ForceRedrawSidePanel()
+    {
+        ForceRedrawControlTree(sidePanel);
+        ForceRedrawControlTree(_toggleSidePanelButton);
+
+        if (IsHandleCreated)
+        {
+            BeginInvoke((Action)(() =>
+            {
+                ForceRedrawControlTree(sidePanel);
+                ForceRedrawControlTree(_toggleSidePanelButton);
+            }));
+        }
+    }
+
+    private static void ForceRedrawControlTree(Control control)
+    {
+        if (!control.IsHandleCreated)
+        {
+            return;
+        }
+
+        control.Invalidate(true);
+        RedrawWindow(
+            control.Handle,
+            IntPtr.Zero,
+            IntPtr.Zero,
+            RdwInvalidate |
+            RdwInternalPaint |
+            RdwErase |
+            RdwFrame |
+            RdwAllChildren |
+            RdwUpdateNow);
+        control.Update();
+
+        foreach (Control child in control.Controls)
+        {
+            ForceRedrawControlTree(child);
+        }
+    }
+
+    private static void EnableDoubleBufferingForPanelTree(Control control)
+    {
+        if (control is Panel or TableLayoutPanel or FlowLayoutPanel)
+        {
+            typeof(Control)
+                .GetProperty(
+                    "DoubleBuffered",
+                    BindingFlags.Instance | BindingFlags.NonPublic)
+                ?.SetValue(control, true);
+        }
+
+        foreach (Control child in control.Controls)
+        {
+            EnableDoubleBufferingForPanelTree(child);
         }
     }
 

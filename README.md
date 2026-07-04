@@ -7,7 +7,7 @@ ENTcapture2 は、DirectShow 対応のビデオキャプチャデバイスから
 
 ENTcapture2 は [ENTcapture Ver1](https://github.com/YUKI-ENT/ENTcapture1) の後継版として、.NET / WinForms ベースで作り直しているバージョンです。
 
-<img width="1382" height="1004" alt="001" src="https://github.com/user-attachments/assets/07824ea6-9f80-425c-882c-66d2f0e8f61b" />
+<img width="1196" height="938" alt="スクリーンショット 2026-07-04 090715" src="https://github.com/user-attachments/assets/6f12a4bf-938b-4ff8-9b84-b9af221e5378" />
 
 
 ## 主な特徴

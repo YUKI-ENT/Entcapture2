@@ -1294,6 +1294,7 @@ public partial class MainForm : Form
     {
         if (_deviceComboBox.SelectedItem is not CameraDeviceInfo device)
         {
+            UpdateInteractionGuards();
             return;
         }
 
@@ -1314,6 +1315,7 @@ public partial class MainForm : Form
                 _resolutionComboBox.EndUpdate();
             }
 
+            UpdateInteractionGuards();
             return;
         }
 
@@ -1341,6 +1343,8 @@ public partial class MainForm : Form
         {
             _resolutionComboBox.EndUpdate();
         }
+
+        UpdateInteractionGuards();
     }
 
     private int GetPreferredResolutionIndex(CaptureResolution? preferredResolution)
@@ -1501,6 +1505,7 @@ public partial class MainForm : Form
             // Overwrite current UI/internal filter state with the selected preset before starting preview/recording.
             if (_selectedPreset is not null)
             {
+                ApplyDeviceControlsForPreset(_selectedPreset, device);
                 ApplyFilterStateToControls(new ImageFilterState(
                     _selectedPreset.WhiteBalanceRed,
                     _selectedPreset.WhiteBalanceGreen,
@@ -5011,6 +5016,7 @@ public partial class MainForm : Form
                 appliedState.FlipHorizontal,
                 appliedState.FlipVertical,
                 appliedState.SimpleNbi);
+            ApplyDeviceControlsForPreset(preset, device);
             System.Diagnostics.Debug.WriteLine($"[DEBUG] ApplyPreset id={preset.Id} deviceId='{preset.DeviceId}' flipH={preset.FlipHorizontal} flipV={preset.FlipVertical} simpleNbi={preset.SimpleNbi}");
         }
         finally
@@ -5019,6 +5025,34 @@ public partial class MainForm : Form
             _isUpdatingPresetControls = false;
             ProcessingControlChanged();
             UpdateInteractionGuards();
+        }
+    }
+
+    private void ApplyDeviceControlsForPreset(
+        CapturePreset preset,
+        CameraDeviceInfo? device)
+    {
+        if (device is null ||
+            device.IsMissing ||
+            !preset.DeviceControls.ApplyOnPresetSelect)
+        {
+            return;
+        }
+
+        try
+        {
+            DirectShowDeviceControlService.Apply(device, preset.DeviceControls);
+            ENTcapture2.Core.Services.DebugLogger.Info(
+                $"Applied DirectShow device controls for preset '{preset.Name}': " +
+                DirectShowDeviceControlService.Describe(preset.DeviceControls));
+        }
+        catch (Exception exception)
+        {
+            ENTcapture2.Core.Services.DebugLogger.Error(
+                $"Failed to apply DirectShow device controls for preset '{preset.Name}'",
+                exception);
+            _statusLabel.Text = "● デバイス設定を適用できませんでした";
+            _statusLabel.ForeColor = Theme.Danger;
         }
     }
 

@@ -212,6 +212,13 @@ public sealed class JsonSettingsStore : ISettingsStore
             preset.Roi ??= string.Empty;
             preset.OverlayText ??= string.Empty;
             preset.FontName ??= string.Empty;
+            preset.DeviceControls ??= new DeviceControlPreset();
+            preset.DeviceControls.VideoProcAmp ??= [];
+            preset.DeviceControls.CameraControl ??= [];
+            preset.DeviceControls.VideoProcAmp.RemoveAll(
+                item => string.IsNullOrWhiteSpace(item.Property));
+            preset.DeviceControls.CameraControl.RemoveAll(
+                item => string.IsNullOrWhiteSpace(item.Property));
             preset.WhiteBalanceRed = Math.Clamp(preset.WhiteBalanceRed, 0, 510);
             preset.WhiteBalanceGreen = Math.Clamp(preset.WhiteBalanceGreen, 0, 510);
             preset.WhiteBalanceBlue = Math.Clamp(preset.WhiteBalanceBlue, 0, 510);

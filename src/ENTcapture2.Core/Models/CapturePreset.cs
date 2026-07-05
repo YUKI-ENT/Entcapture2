@@ -44,6 +44,8 @@ public sealed class CapturePreset
 
     public bool SimpleNbi { get; set; }
 
+    public DeviceControlPreset DeviceControls { get; set; } = new();
+
     public CapturePreset Clone()
     {
         return new CapturePreset
@@ -68,7 +70,8 @@ public sealed class CapturePreset
             Gamma = Gamma,
             FlipHorizontal = FlipHorizontal,
             FlipVertical = FlipVertical,
-            SimpleNbi = SimpleNbi
+            SimpleNbi = SimpleNbi,
+            DeviceControls = DeviceControls?.Clone() ?? new DeviceControlPreset()
         };
     }
 

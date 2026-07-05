@@ -5,7 +5,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <Deterministic>true</Deterministic>
-    <AppVersion>2.26.7.3</AppVersion>
+    <AppVersion>2.26.7.5</AppVersion>
     <VersionPrefix>$(AppVersion)</VersionPrefix>
     <AssemblyVersion>$(AppVersion)</AssemblyVersion>
     <FileVersion>$(AppVersion)</FileVersion>

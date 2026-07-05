@@ -33,6 +33,11 @@ public partial class SettingsForm : Form
     private readonly Label _snapshotBestFrameWindowLabel = new();
     private readonly NumericUpDown _snapshotBestFrameWindowInput = new();
     private readonly Label _snapshotBestFrameWindowHintLabel = new();
+    private readonly Button _devicePropertiesButton = new();
+    private readonly Button _deviceDiagnosticsButton = new();
+    private readonly CheckBox _applyDeviceControlsCheckBox = new();
+    private readonly Button _captureDeviceControlsButton = new();
+    private readonly Label _deviceControlsSummaryLabel = new();
     private Bitmap? _sampleCoordinateImage;
 
     public SettingsForm()
@@ -78,6 +83,7 @@ public partial class SettingsForm : Form
         ConfigureSampleCoordinatePicker();
         ConfigureRsBasePatientPageOption();
         ConfigureSnapshotBestFrameOption();
+        ConfigureDevicePropertyButton();
         ApplyDpiLayoutFixes();
 
         _videoCheckBox.Text = "動画ファイリング";
@@ -110,6 +116,54 @@ public partial class SettingsForm : Form
             }
         }
 
+    }
+
+    private void ConfigureDevicePropertyButton()
+    {
+        _devicePropertiesButton.Text = "ドライバ設定";
+        _devicePropertiesButton.AutoSize = true;
+        _devicePropertiesButton.Margin = new Padding(8, 0, 0, 0);
+        _devicePropertiesButton.Click += DevicePropertiesButton_Click;
+        Theme.ApplyButton(_devicePropertiesButton, false);
+        _deviceDiagnosticsButton.Text = "対応確認";
+        _deviceDiagnosticsButton.AutoSize = true;
+        _deviceDiagnosticsButton.Margin = new Padding(8, 0, 0, 0);
+        _deviceDiagnosticsButton.Click += DeviceDiagnosticsButton_Click;
+        Theme.ApplyButton(_deviceDiagnosticsButton, false);
+        _applyDeviceControlsCheckBox.Text = "プリセット選択時に標準デバイス設定を自動適用";
+        _applyDeviceControlsCheckBox.AutoSize = true;
+        _applyDeviceControlsCheckBox.Margin = new Padding(16, 5, 0, 5);
+        _captureDeviceControlsButton.Text = "現在値を記録";
+        _captureDeviceControlsButton.AutoSize = true;
+        _captureDeviceControlsButton.Margin = new Padding(16, 0, 0, 0);
+        _captureDeviceControlsButton.Click += CaptureDeviceControlsButton_Click;
+        Theme.ApplyButton(_captureDeviceControlsButton, false);
+        _deviceControlsSummaryLabel.AutoSize = true;
+        _deviceControlsSummaryLabel.ForeColor = Theme.Muted;
+        _deviceControlsSummaryLabel.Margin = new Padding(12, 5, 0, 5);
+
+        if (_deviceComboBox.Parent is FlowLayoutPanel)
+        {
+            return;
+        }
+
+        var devicePanel = new FlowLayoutPanel
+        {
+            AutoSize = true,
+            Dock = DockStyle.Fill,
+            FlowDirection = FlowDirection.LeftToRight,
+            Margin = Padding.Empty,
+            WrapContents = false
+        };
+        editorLayout.Controls.Remove(_deviceComboBox);
+        _deviceComboBox.Width = ScaleDpi(342);
+        devicePanel.Controls.Add(_deviceComboBox);
+        devicePanel.Controls.Add(_devicePropertiesButton);
+        devicePanel.Controls.Add(_deviceDiagnosticsButton);
+        editorLayout.Controls.Add(devicePanel, 1, 2);
+        presetOptionsPanel.Controls.Add(_applyDeviceControlsCheckBox);
+        presetOptionsPanel.Controls.Add(_captureDeviceControlsButton);
+        presetOptionsPanel.Controls.Add(_deviceControlsSummaryLabel);
     }
 
     private int ScaleDpi(int value)
@@ -654,10 +708,15 @@ public partial class SettingsForm : Form
                 return;
             }
 
+            preset.DeviceControls ??= new DeviceControlPreset();
             _nameTextBox.Text = preset.Name;
             _examinationTextBox.Text = preset.ExaminationType;
             _videoCheckBox.Checked = preset.IsVideo;
             _presetPreviewOnlyCheckBox.Checked = preset.PreviewOnly;
+            _applyDeviceControlsCheckBox.Checked =
+                preset.DeviceControls.ApplyOnPresetSelect;
+            _deviceControlsSummaryLabel.Text =
+                DirectShowDeviceControlService.Describe(preset.DeviceControls);
             ApplyPresetOptionRules(null);
             _fpsInput.Value = Math.Clamp(preset.FramesPerSecond, 0, 240);
 
@@ -666,6 +725,7 @@ public partial class SettingsForm : Form
             EnsureDeviceItem(device);
             _deviceComboBox.SelectedItem = device;
             LoadResolutions(device, preset.Resolution);
+            UpdateDevicePropertiesButtonState();
 
             int[] roi = ParseRoi(preset.Roi);
             _roiX1Input.Value = roi[0];
@@ -693,10 +753,13 @@ public partial class SettingsForm : Form
         _nameTextBox.Clear();
         _examinationTextBox.Clear();
         _deviceComboBox.SelectedIndex = -1;
+        UpdateDevicePropertiesButtonState();
         _resolutionComboBox.Items.Clear();
         _fpsInput.Value = 0;
         _videoCheckBox.Checked = false;
         _presetPreviewOnlyCheckBox.Checked = false;
+        _applyDeviceControlsCheckBox.Checked = false;
+        _deviceControlsSummaryLabel.Text = string.Empty;
         _roiX1Input.Value = 0;
         _roiY1Input.Value = 0;
         _roiX2Input.Value = 0;
@@ -715,6 +778,7 @@ public partial class SettingsForm : Form
         }
 
         CapturePreset preset = _editingPreset;
+        preset.DeviceControls ??= new DeviceControlPreset();
         preset.Name = string.IsNullOrWhiteSpace(_nameTextBox.Text)
             ? "新しいプリセット"
             : _nameTextBox.Text.Trim();
@@ -722,6 +786,8 @@ public partial class SettingsForm : Form
         preset.IsVideo = _videoCheckBox.Checked;
         preset.PreviewOnly = _presetPreviewOnlyCheckBox.Checked &&
             !preset.IsVideo;
+        preset.DeviceControls.ApplyOnPresetSelect =
+            _applyDeviceControlsCheckBox.Checked;
         preset.FramesPerSecond = decimal.ToInt32(_fpsInput.Value);
         preset.FontName = _fontComboBox.Text.Trim();
 
@@ -799,6 +865,153 @@ public partial class SettingsForm : Form
         LoadResolutions(
             _deviceComboBox.SelectedItem as CameraDeviceInfo,
             null);
+        UpdateDevicePropertiesButtonState();
+    }
+
+    private void UpdateDevicePropertiesButtonState()
+    {
+        bool enabled =
+            _deviceComboBox.SelectedItem is CameraDeviceInfo { IsMissing: false };
+        _devicePropertiesButton.Enabled = enabled;
+        _deviceDiagnosticsButton.Enabled = enabled;
+        _captureDeviceControlsButton.Enabled = enabled;
+    }
+
+    private void DevicePropertiesButton_Click(object? sender, EventArgs e)
+    {
+        if (_deviceComboBox.SelectedItem is not CameraDeviceInfo device ||
+            device.IsMissing)
+        {
+            return;
+        }
+
+        try
+        {
+            DirectShowDevicePropertyDialog.Show(this, device);
+        }
+        catch (Exception exception)
+        {
+            MessageBox.Show(
+                this,
+                $"デバイス設定を開けませんでした。\r\n{exception.Message}",
+                "ENTcapture2",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error);
+        }
+    }
+
+    private void DeviceDiagnosticsButton_Click(object? sender, EventArgs e)
+    {
+        if (_deviceComboBox.SelectedItem is not CameraDeviceInfo device ||
+            device.IsMissing)
+        {
+            return;
+        }
+
+        try
+        {
+            string report = DirectShowDeviceDiagnostics.CreateReport(device);
+            ShowDeviceDiagnosticsReport(report);
+        }
+        catch (Exception exception)
+        {
+            MessageBox.Show(
+                this,
+                $"対応項目を確認できませんでした。\r\n{exception.Message}",
+                "ENTcapture2",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error);
+        }
+    }
+
+    private void CaptureDeviceControlsButton_Click(object? sender, EventArgs e)
+    {
+        if (_editingPreset is null ||
+            _deviceComboBox.SelectedItem is not CameraDeviceInfo device ||
+            device.IsMissing)
+        {
+            return;
+        }
+
+        try
+        {
+            SavePresetEditor();
+            DeviceControlPreset controls =
+                DirectShowDeviceControlService.CaptureCurrent(device);
+            controls.ApplyOnPresetSelect = true;
+            _editingPreset.DeviceControls = controls;
+            _applyDeviceControlsCheckBox.Checked = true;
+            _deviceControlsSummaryLabel.Text =
+                DirectShowDeviceControlService.Describe(controls);
+            if (controls.VideoProcAmp.Count + controls.CameraControl.Count == 0)
+            {
+                MessageBox.Show(
+                    this,
+                    "標準APIで記録できるデバイス設定がありませんでした。",
+                    "ENTcapture2",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+                return;
+            }
+
+            MessageBox.Show(
+                this,
+                $"現在の標準デバイス設定を記録しました。\r\n{_deviceControlsSummaryLabel.Text}",
+                "ENTcapture2",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
+        }
+        catch (Exception exception)
+        {
+            MessageBox.Show(
+                this,
+                $"現在値を記録できませんでした。\r\n{exception.Message}",
+                "ENTcapture2",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error);
+        }
+    }
+
+    private void ShowDeviceDiagnosticsReport(string report)
+    {
+        using var dialog = new Form
+        {
+            Text = "デバイス対応確認",
+            StartPosition = FormStartPosition.CenterParent,
+            Size = ScaleDpi(new Size(760, 560)),
+            MinimizeBox = false,
+            MaximizeBox = true
+        };
+        var textBox = new TextBox
+        {
+            Dock = DockStyle.Fill,
+            Multiline = true,
+            ReadOnly = true,
+            ScrollBars = ScrollBars.Both,
+            WordWrap = false,
+            Font = new Font(FontFamily.GenericMonospace, 9F),
+            Text = report
+        };
+        var closeButton = new Button
+        {
+            Text = "閉じる",
+            DialogResult = DialogResult.OK,
+            AutoSize = true,
+            Anchor = AnchorStyles.Right
+        };
+        Theme.ApplyButton(closeButton, true);
+        var footer = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Bottom,
+            FlowDirection = FlowDirection.RightToLeft,
+            Height = ScaleDpi(48),
+            Padding = ScaleDpi(new Padding(8))
+        };
+        footer.Controls.Add(closeButton);
+        dialog.Controls.Add(textBox);
+        dialog.Controls.Add(footer);
+        dialog.AcceptButton = closeButton;
+        dialog.ShowDialog(this);
     }
 
     private void LoadResolutions(
@@ -1773,7 +1986,8 @@ public partial class SettingsForm : Form
             Gamma = source.Gamma,
             FlipHorizontal = source.FlipHorizontal,
             FlipVertical = source.FlipVertical,
-            SimpleNbi = source.SimpleNbi
+            SimpleNbi = source.SimpleNbi,
+            DeviceControls = source.DeviceControls?.Clone() ?? new DeviceControlPreset()
         };
     }
 }

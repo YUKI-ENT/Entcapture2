@@ -3123,6 +3123,7 @@ public partial class MainForm : Form
             () => _lastPlaybackPosition,
             time => _playbackService.Seek(time),
             CaptureDisplayedImage,
+            _playbackCapturedAt ?? DateTime.Now,
             BuildRsBaseFileName,
             BuildSequentialRsBaseFileNames);
         if (dialog.ShowDialog(this) == DialogResult.OK)

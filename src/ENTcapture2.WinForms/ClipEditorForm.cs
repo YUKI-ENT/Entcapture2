@@ -12,6 +12,7 @@ internal sealed class ClipEditorForm : Form
     private readonly Func<Bitmap?> _capturePreview;
     private readonly Func<string, DateTime, string, string> _buildFileName;
     private readonly Func<string, DateTime, string, int, string[]> _buildFileNames;
+    private readonly DateTime _sourceCapturedAt;
     private readonly List<ClipExportRange> _ranges = [];
     private PlaybackPosition? _lastPosition;
     private TimeSpan? _startTime;
@@ -62,6 +63,7 @@ internal sealed class ClipEditorForm : Form
         Func<PlaybackPosition?> getPlaybackPosition,
         Action<TimeSpan> seekPlayback,
         Func<Bitmap?> capturePreview,
+        DateTime sourceCapturedAt,
         Func<string, DateTime, string, string> buildFileName,
         Func<string, DateTime, string, int, string[]> buildFileNames)
     {
@@ -69,6 +71,7 @@ internal sealed class ClipEditorForm : Form
         _getPlaybackPosition = getPlaybackPosition;
         _seekPlayback = seekPlayback;
         _capturePreview = capturePreview;
+        _sourceCapturedAt = sourceCapturedAt;
         _buildFileName = buildFileName;
         _buildFileNames = buildFileNames;
 
@@ -722,6 +725,13 @@ internal sealed class ClipEditorForm : Form
 
     private async Task ExportAsync()
     {
+        if (_startTime is not null &&
+            _endTime is not null &&
+            _endTime > _startTime)
+        {
+            AddRange();
+        }
+
         ClipExportRange[] exportRanges = GetExportRanges().ToArray();
         if (exportRanges.Length == 0)
         {
@@ -753,7 +763,7 @@ internal sealed class ClipEditorForm : Form
             StringComparison.OrdinalIgnoreCase)
                 ? ".avi"
                 : ".mp4";
-        DateTime now = DateTime.Now;
+        DateTime capturedAt = GetOutputCapturedAt(exportRanges);
         var exporter = new ClipExportService();
         var progress = new Progress<string>(
             message =>
@@ -771,7 +781,7 @@ internal sealed class ClipEditorForm : Form
             {
                 string outputFile = Path.Combine(
                     outputDirectory,
-                    _buildFileName(outputDirectory, now, extension));
+                    _buildFileName(outputDirectory, capturedAt, extension));
                 await exporter.ExportJoinedAsync(
                     _sourceFiles,
                     exportRanges,
@@ -783,7 +793,7 @@ internal sealed class ClipEditorForm : Form
             {
                 string[] outputFiles = _buildFileNames(
                     outputDirectory,
-                    now,
+                    capturedAt,
                     extension,
                     exportRanges.Length)
                     .Select(fileName => Path.Combine(outputDirectory, fileName))
@@ -1083,12 +1093,12 @@ internal sealed class ClipEditorForm : Form
             StringComparison.OrdinalIgnoreCase)
                 ? ".avi"
                 : ".mp4";
-        DateTime now = DateTime.Now;
+        DateTime capturedAt = GetOutputCapturedAt(ranges);
         if (_joinedRadioButton.Checked)
         {
             string outputFile = Path.Combine(
                 outputDirectory,
-                _buildFileName(outputDirectory, now, extension));
+                _buildFileName(outputDirectory, capturedAt, extension));
             string firstCommand = ClipExportService.BuildExportCommandPreview(
                 _sourceFiles,
                 ranges[0],
@@ -1114,7 +1124,7 @@ internal sealed class ClipEditorForm : Form
 
         string outputName = _buildFileNames(
             outputDirectory,
-            now,
+            capturedAt,
             extension,
             Math.Max(1, ranges.Count))[0];
         string command = ClipExportService.BuildExportCommandPreview(
@@ -1132,10 +1142,24 @@ internal sealed class ClipEditorForm : Form
             return _ranges;
         }
 
+        if (_startTime is not null &&
+            _endTime is not null &&
+            _endTime > _startTime)
+        {
+            return [new ClipExportRange(_startTime.Value, _endTime.Value)];
+        }
+
         TimeSpan total = _lastPosition?.TotalTime ?? TimeSpan.Zero;
         return total > TimeSpan.Zero
             ? [new ClipExportRange(TimeSpan.Zero, total)]
             : [];
+    }
+
+    private DateTime GetOutputCapturedAt(IReadOnlyList<ClipExportRange> ranges)
+    {
+        return ranges.Count > 0
+            ? _sourceCapturedAt + ranges[0].Start
+            : _sourceCapturedAt;
     }
 
     private IEnumerable<ClipExportRange> GetDisplayRanges(TimeSpan total)

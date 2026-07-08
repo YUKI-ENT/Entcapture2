@@ -31,6 +31,8 @@ public sealed class ApplicationSettings
 
     public string H264EncoderPreference { get; set; } = "AUTO";
 
+    public int TemporaryRecordingH264Quality { get; set; } = 18;
+
     public int RecordingSegmentMinutes { get; set; } = 10;
 
     public int TemporaryFileRetentionDays { get; set; } = 7;

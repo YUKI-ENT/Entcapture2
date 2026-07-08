@@ -33,6 +33,8 @@ public partial class SettingsForm : Form
     private readonly Label _snapshotBestFrameWindowLabel = new();
     private readonly NumericUpDown _snapshotBestFrameWindowInput = new();
     private readonly Label _snapshotBestFrameWindowHintLabel = new();
+    private readonly Label _h264QualityLabel = new();
+    private readonly NumericUpDown _h264QualityInput = new();
     private readonly Button _devicePropertiesButton = new();
     private readonly Button _deviceDiagnosticsButton = new();
     private readonly CheckBox _applyDeviceControlsCheckBox = new();
@@ -105,6 +107,7 @@ public partial class SettingsForm : Form
             });
         _temporaryCodecComboBox.SelectedIndexChanged +=
             (_, _) => UpdateEncoderSelectionState();
+        ConfigureTemporaryH264QualityOption();
 
         using var fonts = new InstalledFontCollection();
         _fontComboBox.Items.Add("Yu Gothic UI");
@@ -198,11 +201,11 @@ public partial class SettingsForm : Form
         generalLayout.AutoSize = true;
         generalLayout.AutoSizeMode = AutoSizeMode.GrowAndShrink;
         generalLayout.Dock = DockStyle.Top;
-        SetAbsoluteRows(generalLayout, 24, 260, 310, 390);
+        SetAbsoluteRows(generalLayout, 24, 260, 350, 390);
 
         ScaleCard(snapshotCardPanel, 250, new Padding(14));
         ScaleCard(finalVideoCardPanel, 250, new Padding(14));
-        ScaleCard(temporaryCardPanel, 300, new Padding(14));
+        ScaleCard(temporaryCardPanel, 340, new Padding(14));
         ScaleCard(hotkeyCardPanel, 300, new Padding(14));
         ScaleCard(roiCardPanel, 480, new Padding(14));
         ScaleCard(integrationCardPanel, 380, new Padding(18));
@@ -210,7 +213,17 @@ public partial class SettingsForm : Form
 
         SetAbsoluteRows(snapshotCardLayout, 30, 42, 42, 46, 78);
         SetAbsoluteRows(finalVideoCardLayout, 32, 44, 44, 44, 32);
-        SetAbsoluteRows(temporaryCardLayout, 30, 42, 38, 38, 38, 38, 38, 24);
+        SetAbsoluteRows(
+            temporaryCardLayout,
+            30,
+            42,
+            38,
+            38,
+            38,
+            38,
+            38,
+            38,
+            24);
         if (hotkeyCardLayout.RowStyles.Count >= 6)
         {
             SetRows(
@@ -251,6 +264,40 @@ public partial class SettingsForm : Form
         ScaleButton(_exportSettingsButton, 135, 38);
         ScaleButton(_importSettingsButton, 135, 38);
         ScaleButton(_importLegacyButton, 147, 38);
+    }
+
+    private void ConfigureTemporaryH264QualityOption()
+    {
+        if (_h264QualityInput.Parent is not null)
+        {
+            return;
+        }
+
+        foreach (Control control in temporaryCardLayout.Controls)
+        {
+            int row = temporaryCardLayout.GetRow(control);
+            if (row >= 4)
+            {
+                temporaryCardLayout.SetRow(control, row + 1);
+            }
+        }
+
+        temporaryCardLayout.RowCount++;
+        temporaryCardLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 38F));
+
+        _h264QualityLabel.Anchor = AnchorStyles.Left;
+        _h264QualityLabel.AutoSize = true;
+        _h264QualityLabel.Text = "H.264 QP";
+
+        _h264QualityInput.Minimum = 1;
+        _h264QualityInput.Maximum = 51;
+        _h264QualityInput.Value = 18;
+        _h264QualityInput.Size = new Size(120, 23);
+
+        temporaryCardLayout.Controls.Add(_h264QualityLabel, 0, 4);
+        temporaryCardLayout.Controls.Add(_h264QualityInput, 1, 4);
+        Theme.Apply(_h264QualityLabel);
+        Theme.Apply(_h264QualityInput);
     }
 
     private void ScaleCard(Control card, int minimumHeight, Padding padding)
@@ -593,6 +640,8 @@ public partial class SettingsForm : Form
                     "QSV" => "QSV",
                     _ => "自動"
                 };
+            _h264QualityInput.Value =
+                Math.Clamp(Settings.TemporaryRecordingH264Quality, 1, 51);
             _segmentMinutesInput.Value =
                 Math.Clamp(Settings.RecordingSegmentMinutes, 1, 240);
             _retentionDaysInput.Value =
@@ -631,10 +680,13 @@ public partial class SettingsForm : Form
 
     private void UpdateEncoderSelectionState()
     {
-        _h264EncoderComboBox.Enabled = string.Equals(
+        bool isH264 = string.Equals(
             _temporaryCodecComboBox.Text,
             "H264",
             StringComparison.OrdinalIgnoreCase);
+        _h264EncoderComboBox.Enabled = isH264;
+        _h264QualityLabel.Enabled = isH264;
+        _h264QualityInput.Enabled = isH264;
     }
 
     private static string ToFinalVideoQualityDisplayName(string? value)
@@ -1645,6 +1697,8 @@ public partial class SettingsForm : Form
                 "QSV" => "QSV",
                 _ => "AUTO"
             };
+        Settings.TemporaryRecordingH264Quality =
+            decimal.ToInt32(_h264QualityInput.Value);
         Settings.RecordingSegmentMinutes =
             decimal.ToInt32(_segmentMinutesInput.Value);
         Settings.TemporaryFileRetentionDays =
@@ -1747,6 +1801,8 @@ public partial class SettingsForm : Form
                 "QSV" => "QSV",
                 _ => "AUTO"
             };
+        Settings.TemporaryRecordingH264Quality =
+            decimal.ToInt32(_h264QualityInput.Value);
         Settings.RecordingSegmentMinutes =
             decimal.ToInt32(_segmentMinutesInput.Value);
         Settings.TemporaryFileRetentionDays =
@@ -1929,6 +1985,8 @@ public partial class SettingsForm : Form
             TemporaryRecordingDirectory = source.TemporaryRecordingDirectory,
             TemporaryRecordingCodec = source.TemporaryRecordingCodec,
             H264EncoderPreference = source.H264EncoderPreference,
+            TemporaryRecordingH264Quality =
+                source.TemporaryRecordingH264Quality,
             RecordingSegmentMinutes = source.RecordingSegmentMinutes,
             TemporaryFileRetentionDays = source.TemporaryFileRetentionDays,
             MaximumPreviewFramesPerSecond =

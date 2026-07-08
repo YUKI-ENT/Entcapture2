@@ -19,7 +19,8 @@ internal sealed class FfmpegVideoWriter : IDisposable
         string path,
         CvSize frameSize,
         FfmpegEncoderSelection encoder,
-        double framesPerSecond)
+        double framesPerSecond,
+        int h264Quality)
     {
         Encoder = encoder;
         _frameBuffer = new byte[checked(
@@ -32,7 +33,8 @@ internal sealed class FfmpegVideoWriter : IDisposable
             path,
             frameSize,
             encoder,
-            framesPerSecond);
+            framesPerSecond,
+            h264Quality);
 
         _process = new Process { StartInfo = startInfo };
         try
@@ -139,7 +141,8 @@ internal sealed class FfmpegVideoWriter : IDisposable
         string path,
         CvSize frameSize,
         FfmpegEncoderSelection encoder,
-        double framesPerSecond)
+        double framesPerSecond,
+        int h264Quality)
     {
         string frameRate = NormalizeFrameRate(framesPerSecond);
         Add(arguments,
@@ -155,7 +158,10 @@ internal sealed class FfmpegVideoWriter : IDisposable
             "-i", "pipe:0",
             "-an",
             "-c:v", encoder.EncoderName);
-        FfmpegRuntime.AddEncoderArguments(arguments, encoder.EncoderName);
+        FfmpegRuntime.AddEncoderArguments(
+            arguments,
+            encoder.EncoderName,
+            h264Quality: h264Quality);
         string pixelFormat =
             FfmpegRuntime.GetOutputPixelFormat(encoder.EncoderName);
         Add(arguments,

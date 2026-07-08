@@ -872,7 +872,8 @@ public sealed class CameraCaptureService : IAsyncDisposable
                                 path,
                                 processed.Size(),
                                 ffmpegEncoder,
-                                options.FramesPerSecond);
+                                options.FramesPerSecond,
+                                options.H264Quality);
                             LastRecordingEncoder =
                                 ffmpegEncoder.DisplayName;
                         }
@@ -1294,4 +1295,5 @@ public sealed record RecordingOptions(
     double FramesPerSecond,
     string FileNamePrefix,
     int SegmentMinutes,
-    string H264EncoderPreference);
+    string H264EncoderPreference,
+    int H264Quality);

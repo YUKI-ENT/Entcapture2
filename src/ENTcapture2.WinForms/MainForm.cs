@@ -1483,7 +1483,8 @@ public partial class MainForm : Form
                         GetRecordingFrameRate(resolution),
                         BuildTemporaryRecordingPrefix(),
                         _settings.RecordingSegmentMinutes,
-                        _settings.H264EncoderPreference)
+                        _settings.H264EncoderPreference,
+                        _settings.TemporaryRecordingH264Quality)
                     : null;
             ENTcapture2.Core.Services.DebugLogger.Info(
                 "StartButton_Click: Starting camera" +

@@ -176,8 +176,10 @@ internal static class FfmpegRuntime
     public static void AddEncoderArguments(
         Collection<string> arguments,
         string encoder,
-        bool bitrateControlled = false)
+        bool bitrateControlled = false,
+        int h264Quality = 18)
     {
+        h264Quality = Math.Clamp(h264Quality, 1, 51);
         switch (encoder)
         {
             case "mjpeg":
@@ -191,26 +193,28 @@ internal static class FfmpegRuntime
                 Add(arguments, "-preset", "p1", "-tune", "ll");
                 Add(arguments, bitrateControlled
                     ? ["-rc", "vbr"]
-                    : ["-rc", "constqp", "-qp", "18"]);
+                    : ["-rc", "constqp", "-qp", h264Quality.ToString()]);
                 break;
             case "h264_amf":
                 Add(arguments, "-quality", "speed");
                 Add(arguments, bitrateControlled
                     ? ["-usage", "transcoding", "-rc", "cbr"]
-                    : ["-usage", "lowlatency", "-rc", "cqp", "-qp_i", "18", "-qp_p", "18"]);
+                    : ["-usage", "lowlatency", "-rc", "cqp",
+                        "-qp_i", h264Quality.ToString(),
+                        "-qp_p", h264Quality.ToString()]);
                 break;
             case "h264_qsv":
                 Add(arguments, "-preset", "veryfast");
                 if (!bitrateControlled)
                 {
-                    Add(arguments, "-global_quality", "18");
+                    Add(arguments, "-global_quality", h264Quality.ToString());
                 }
 
                 break;
             case "h264_mf":
                 if (!bitrateControlled)
                 {
-                    Add(arguments, "-quality", "75");
+                    Add(arguments, "-quality", ToMediaFoundationQuality(h264Quality).ToString());
                 }
 
                 break;
@@ -223,6 +227,15 @@ internal static class FfmpegRuntime
 
                 break;
         }
+    }
+
+    private static int ToMediaFoundationQuality(int h264Quality)
+    {
+        h264Quality = Math.Clamp(h264Quality, 1, 51);
+        return Math.Clamp(
+            100 - (int)Math.Round((h264Quality - 1) * 99.0 / 50.0),
+            1,
+            100);
     }
 
     public static string GetOutputPixelFormat(string encoder)

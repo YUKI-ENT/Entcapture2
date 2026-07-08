@@ -144,6 +144,8 @@ public sealed class JsonSettingsStore : ISettingsStore
             settings.H264EncoderPreference = "AUTO";
         }
 
+        settings.TemporaryRecordingH264Quality =
+            Math.Clamp(settings.TemporaryRecordingH264Quality, 1, 51);
         settings.RecordingSegmentMinutes =
             Math.Clamp(settings.RecordingSegmentMinutes, 1, 240);
         settings.TemporaryFileRetentionDays =

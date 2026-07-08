@@ -57,6 +57,7 @@ public partial class MainForm : Form
     private readonly FlowLayoutPanel _sourceHeaderPanel = new();
     private readonly ModernButton _openLogFileButton = new();
     private readonly ModernButton _toggleSidePanelButton = new();
+    private readonly ModernButton _openGramStainAnalysisButton = new();
     private readonly ModernButton _openSnapshotFolderButton = new();
     private readonly ModernButton _rsBaseImportButton = new();
     private readonly ToolTip _thumbnailToolTip = new();
@@ -323,6 +324,10 @@ public partial class MainForm : Form
         _toggleSidePanelButton.Anchor = AnchorStyles.None;
         _toggleSidePanelButton.Size = ScaleDpi(new Size(38, 112));
         _toggleSidePanelButton.Margin = ScaleDpi(new Padding(1));
+        ConfigureModernButton(
+            _openGramStainAnalysisButton,
+            "細菌解析",
+            Theme.Accent);
 
         ConfigureCard(filterCard);
         ConfigureLabel(
@@ -416,6 +421,8 @@ public partial class MainForm : Form
         sourceCard.Width = sideCardWidth;
         filterCard.Width = sideCardWidth;
         captureCard.Width = sideCardWidth;
+        _openGramStainAnalysisButton.Width = sideCardWidth;
+        _openGramStainAnalysisButton.Margin = ScaleDpi(new Padding(0, 0, 0, 12));
         filterCard.Visible = true;
         captureCard.Visible = true;
         captureCard.MinimumSize = new Size(sideCardWidth, 0);
@@ -439,6 +446,11 @@ public partial class MainForm : Form
         sourceCard.Visible = false;
         sidePanel.Controls.Remove(_toggleImageControlButton);
         sidePanel.Controls.Remove(_togglePresetToolsButton);
+        if (!sidePanel.Controls.Contains(_openGramStainAnalysisButton))
+        {
+            sidePanel.Controls.Add(_openGramStainAnalysisButton);
+        }
+
         if (!sidePanel.Controls.Contains(filterCard))
         {
             sidePanel.Controls.Add(filterCard);
@@ -448,6 +460,7 @@ public partial class MainForm : Form
             sidePanel.Controls.Add(captureCard);
         }
         captureCard.Visible = true;
+        sidePanel.Controls.SetChildIndex(_openGramStainAnalysisButton, 0);
 
         _sourceHeaderPanel.AutoSize = true;
         _sourceHeaderPanel.WrapContents = false;
@@ -1128,6 +1141,7 @@ public partial class MainForm : Form
         _openPlaybackButton.Click += OpenPlaybackButton_Click;
         _toggleSidePanelButton.Click +=
             async (_, _) => await ToggleSidePanelAsync();
+        _openGramStainAnalysisButton.Click += OpenGramStainAnalysisButton_Click;
         _savePresetButton.Click += SavePresetButton_Click;
         _morePresetsDropDownButton.Click += MorePresetsDropDownButton_Click;
         _openSnapshotFolderButton.Click += OpenSnapshotFolderButton_Click;
@@ -4083,6 +4097,15 @@ public partial class MainForm : Form
         {
             ShowError("ログファイルを開けませんでした。", exception);
         }
+    }
+
+    private void OpenGramStainAnalysisButton_Click(object? sender, EventArgs e)
+    {
+        string directory = string.IsNullOrWhiteSpace(_settings.SnapshotDirectory)
+            ? ApplicationSettings.CreateDefault().SnapshotDirectory
+            : _settings.SnapshotDirectory;
+        var form = new GramStainAnalysisForm(directory);
+        form.Show(this);
     }
 
     private void OpenSnapshotFolderButton_Click(object? sender, EventArgs e)

@@ -88,7 +88,7 @@ internal sealed class GramStainAnalysisService
                     meanBgr));
         }
 
-        using Mat overlay = bgr.Clone();
+        Mat overlay = bgr.Clone();
         DrawOverlay(overlay, detections);
 
         return new GramStainAnalysisResult(

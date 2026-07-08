@@ -55,7 +55,7 @@ internal sealed class YoloBacteriaDetector : IDisposable
         List<GramStainDetection> detections = selected
             .Select(ToDetection)
             .ToList();
-        using Mat overlay = bgr.Clone();
+        Mat overlay = bgr.Clone();
         DrawOverlay(overlay, detections);
 
         return new GramStainAnalysisResult(

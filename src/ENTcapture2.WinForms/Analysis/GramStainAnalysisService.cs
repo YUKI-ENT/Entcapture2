@@ -6,12 +6,21 @@ namespace ENTcapture2.WinForms.Analysis;
 
 internal sealed class GramStainAnalysisService
 {
-    public GramStainAnalysisResult Analyze(Mat source)
+    public GramStainAnalysisResult Analyze(
+        Mat source,
+        GramStainRuleAnalysisOptions? options = null)
     {
         if (source.Empty())
         {
             throw new ArgumentException("画像が空です。", nameof(source));
         }
+
+        options ??= GramStainRuleAnalysisOptions.Default;
+        int minTargetPixels = Math.Clamp(options.MinTargetPixels, 1, 10000);
+        int maxTargetPixels = Math.Clamp(
+            Math.Max(options.MaxTargetPixels, minTargetPixels),
+            minTargetPixels,
+            10000);
 
         using Mat bgr = EnsureBgr(source);
         using Mat hsv = new();
@@ -40,9 +49,8 @@ internal sealed class GramStainAnalysisService
             RetrievalModes.External,
             ContourApproximationModes.ApproxSimple);
 
-        double imageArea = Math.Max(1, bgr.Width * bgr.Height);
-        double minArea = Math.Max(5, imageArea * 0.000002);
-        double maxArea = Math.Max(200, imageArea * 0.003);
+        double minArea = Math.Max(3, minTargetPixels * minTargetPixels * 0.12);
+        double maxArea = Math.Max(minArea + 1, maxTargetPixels * maxTargetPixels * 3.0);
         var detections = new List<GramStainDetection>();
 
         foreach (CvPoint[] contour in contours)
@@ -54,7 +62,9 @@ internal sealed class GramStainAnalysisService
             }
 
             Rect bounds = Cv2.BoundingRect(contour);
-            if (bounds.Width < 2 || bounds.Height < 2)
+            int longSide = Math.Max(bounds.Width, bounds.Height);
+            if (longSide < minTargetPixels || longSide > maxTargetPixels ||
+                bounds.Width < 2 || bounds.Height < 2)
             {
                 continue;
             }
@@ -239,7 +249,10 @@ internal sealed class GramStainAnalysisService
         IReadOnlyList<GramStainDetection> detections)
     {
         GramStainCounts counts = CreateCounts(detections);
-        var candidates = new List<string>();
+        var candidates = new List<string>
+        {
+            "ルール解析: 色と輪郭サイズによる簡易判定です。最終判断には使わず参考値として確認してください。"
+        };
         if (counts.GramPositiveCocci > 0)
         {
             candidates.Add("G+球菌: ブドウ球菌/レンサ球菌/腸球菌などの候補。配列確認が必要です。");
@@ -260,11 +273,6 @@ internal sealed class GramStainAnalysisService
             candidates.Add("G-桿菌: Enterobacterales/Pseudomonas などの候補。菌名推定は培養等が必要です。");
         }
 
-        if (candidates.Count == 0)
-        {
-            candidates.Add("明確な菌体候補は少数です。染色・ピント・閾値の確認を推奨します。");
-        }
-
         if (counts.Uncertain > 0)
         {
             candidates.Add($"不明/要確認: {counts.Uncertain} 個。重なり、染色ムラ、ゴミの可能性があります。");
@@ -280,16 +288,16 @@ internal sealed class GramStainAnalysisService
         foreach (GramStainDetection detection in detections)
         {
             Scalar color = GetOverlayColor(detection);
-            Cv2.Rectangle(image, detection.Bounds, color, 2);
-            Cv2.DrawContours(image, [detection.Contour], -1, color, 1);
+            Cv2.Rectangle(image, detection.Bounds, color, 3);
+            Cv2.DrawContours(image, [detection.Contour], -1, color, 2);
             Cv2.PutText(
                 image,
                 detection.ShortLabel,
                 new CvPoint(detection.Bounds.Left, Math.Max(12, detection.Bounds.Top - 3)),
                 HersheyFonts.HersheySimplex,
-                0.38,
+                0.46,
                 color,
-                1,
+                2,
                 LineTypes.AntiAlias);
         }
     }
@@ -299,16 +307,23 @@ internal sealed class GramStainAnalysisService
         return (detection.Gram, detection.Shape) switch
         {
             (GramStainPolarity.Positive, BacteriumShape.Coccus) =>
-                new Scalar(220, 90, 210),
+                new Scalar(255, 220, 0),
             (GramStainPolarity.Negative, BacteriumShape.Coccus) =>
-                new Scalar(90, 120, 255),
+                new Scalar(255, 150, 0),
             (GramStainPolarity.Positive, BacteriumShape.Bacillus) =>
-                new Scalar(255, 70, 160),
+                new Scalar(120, 255, 0),
             (GramStainPolarity.Negative, BacteriumShape.Bacillus) =>
-                new Scalar(50, 190, 255),
-            _ => new Scalar(120, 220, 220)
+                new Scalar(255, 255, 0),
+            _ => new Scalar(0, 255, 180)
         };
     }
+}
+
+internal sealed record GramStainRuleAnalysisOptions(
+    int MinTargetPixels,
+    int MaxTargetPixels)
+{
+    public static GramStainRuleAnalysisOptions Default { get; } = new(10, 100);
 }
 
 internal sealed record GramStainAnalysisResult(

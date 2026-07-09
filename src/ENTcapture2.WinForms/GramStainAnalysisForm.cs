@@ -2,6 +2,8 @@ using ENTcapture2.WinForms.Analysis;
 using ENTcapture2.WinForms.Ui;
 using OpenCvSharp;
 using OpenCvSharp.Extensions;
+using DrawingPoint = System.Drawing.Point;
+using DrawingRectangle = System.Drawing.Rectangle;
 using DrawingSize = System.Drawing.Size;
 
 namespace ENTcapture2.WinForms;
@@ -15,10 +17,13 @@ public sealed class GramStainAnalysisForm : Form
     private readonly Button _ruleAnalyzeButton = new();
     private readonly Button _openModelButton = new();
     private readonly Button _aiAnalyzeButton = new();
+    private readonly NumericUpDown _minTargetSizeInput = new();
+    private readonly NumericUpDown _maxTargetSizeInput = new();
     private readonly NumericUpDown _confidenceInput = new();
     private readonly NumericUpDown _iouInput = new();
     private readonly Label _fileLabel = new();
     private readonly Label _modelLabel = new();
+    private readonly Label _measureLabel = new();
     private readonly Label _statusLabel = new();
     private readonly DataGridView _countGrid = new();
     private readonly DataGridView _objectGrid = new();
@@ -27,11 +32,18 @@ public sealed class GramStainAnalysisForm : Form
     private Bitmap? _displayImage;
     private GramStainAnalysisResult? _lastResult;
     private YoloBacteriaDetector? _yoloDetector;
+    private bool _isDraggingMeasure;
+    private DrawingPoint _dragStart;
+    private DrawingPoint _dragEnd;
 
-    public GramStainAnalysisForm(string defaultDirectory)
+    public GramStainAnalysisForm(string defaultDirectory, Bitmap? initialImage = null)
     {
         _defaultDirectory = defaultDirectory;
         InitializeLayout();
+        if (initialImage is not null)
+        {
+            LoadBitmap(initialImage, "現在の表示画像");
+        }
     }
 
     protected override void Dispose(bool disposing)
@@ -51,34 +63,38 @@ public sealed class GramStainAnalysisForm : Form
     {
         Text = "細菌解析";
         StartPosition = FormStartPosition.CenterParent;
-        MinimumSize = new DrawingSize(1180, 720);
-        ClientSize = new DrawingSize(1380, 820);
+        MinimumSize = new DrawingSize(980, 640);
+        ClientSize = new DrawingSize(1180, 740);
 
         var root = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
             ColumnCount = 2,
             RowCount = 3,
-            Padding = new Padding(16),
+            Padding = new Padding(12),
             BackColor = Theme.Window
         };
         root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-        root.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 360F));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 50F));
+        root.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 315F));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 88F));
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 36F));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 34F));
 
         FlowLayoutPanel toolbar = BuildToolbar();
         var imagePanel = new Panel
         {
             Dock = DockStyle.Fill,
             BackColor = Color.Black,
-            Padding = new Padding(8),
-            Margin = new Padding(0, 0, 12, 0)
+            Padding = new Padding(6),
+            Margin = new Padding(0, 0, 10, 0)
         };
         _imageBox.Dock = DockStyle.Fill;
         _imageBox.SizeMode = PictureBoxSizeMode.Zoom;
         _imageBox.BackColor = Color.Black;
+        _imageBox.MouseDown += ImageBox_MouseDown;
+        _imageBox.MouseMove += ImageBox_MouseMove;
+        _imageBox.MouseUp += ImageBox_MouseUp;
+        _imageBox.Paint += ImageBox_Paint;
         imagePanel.Controls.Add(_imageBox);
 
         Control sidePanel = BuildSidePanel();
@@ -110,48 +126,61 @@ public sealed class GramStainAnalysisForm : Form
         {
             Dock = DockStyle.Fill,
             FlowDirection = FlowDirection.LeftToRight,
-            WrapContents = false,
+            WrapContents = true,
             Margin = Padding.Empty,
             BackColor = Theme.Window
         };
 
-        ConfigureToolbarButton(_openImageButton, "静止画を開く", 120);
+        ConfigureToolbarButton(_openImageButton, "静止画を開く", 112);
         _openImageButton.Click += OpenImageButton_Click;
-        ConfigureToolbarButton(_ruleAnalyzeButton, "ルール解析", 90);
+        ConfigureToolbarButton(_ruleAnalyzeButton, "ルール解析", 88);
         _ruleAnalyzeButton.Enabled = false;
         _ruleAnalyzeButton.Click += RuleAnalyzeButton_Click;
-        ConfigureToolbarButton(_openModelButton, "ONNXモデル", 110);
+        ConfigureToolbarButton(_openModelButton, "ONNXモデル", 104);
         _openModelButton.Click += OpenModelButton_Click;
-        ConfigureToolbarButton(_aiAnalyzeButton, "AI解析", 90);
+        ConfigureToolbarButton(_aiAnalyzeButton, "AI解析", 76);
         _aiAnalyzeButton.Enabled = false;
         _aiAnalyzeButton.Click += AiAnalyzeButton_Click;
 
+        ConfigurePixelInput(_minTargetSizeInput, 10);
+        ConfigurePixelInput(_maxTargetSizeInput, 100);
         ConfigurePercentInput(_confidenceInput, 25);
         ConfigurePercentInput(_iouInput, 45);
 
         _fileLabel.AutoSize = false;
-        _fileLabel.Width = 350;
-        _fileLabel.Height = 34;
+        _fileLabel.Width = 330;
+        _fileLabel.Height = 26;
         _fileLabel.TextAlign = ContentAlignment.MiddleLeft;
         _fileLabel.Text = "画像を選択してください";
         _fileLabel.Tag = "text";
         _modelLabel.AutoSize = false;
-        _modelLabel.Width = 220;
-        _modelLabel.Height = 34;
+        _modelLabel.Width = 180;
+        _modelLabel.Height = 26;
         _modelLabel.TextAlign = ContentAlignment.MiddleLeft;
         _modelLabel.Text = "AIモデル未選択";
         _modelLabel.Tag = "text";
+        _measureLabel.AutoSize = false;
+        _measureLabel.Width = 360;
+        _measureLabel.Height = 26;
+        _measureLabel.TextAlign = ContentAlignment.MiddleLeft;
+        _measureLabel.Text = "画像上をドラッグするとpx測定できます";
+        _measureLabel.Tag = "text";
 
         toolbar.Controls.Add(_openImageButton);
         toolbar.Controls.Add(_ruleAnalyzeButton);
+        toolbar.Controls.Add(CreateToolbarLabel("対象px", 54));
+        toolbar.Controls.Add(_minTargetSizeInput);
+        toolbar.Controls.Add(CreateToolbarLabel("-", 12));
+        toolbar.Controls.Add(_maxTargetSizeInput);
         toolbar.Controls.Add(_openModelButton);
         toolbar.Controls.Add(_aiAnalyzeButton);
-        toolbar.Controls.Add(CreateToolbarLabel("Conf%", 50));
+        toolbar.Controls.Add(CreateToolbarLabel("Conf%", 48));
         toolbar.Controls.Add(_confidenceInput);
-        toolbar.Controls.Add(CreateToolbarLabel("IoU%", 42));
+        toolbar.Controls.Add(CreateToolbarLabel("IoU%", 40));
         toolbar.Controls.Add(_iouInput);
         toolbar.Controls.Add(_fileLabel);
         toolbar.Controls.Add(_modelLabel);
+        toolbar.Controls.Add(_measureLabel);
         return toolbar;
     }
 
@@ -162,20 +191,28 @@ public sealed class GramStainAnalysisForm : Form
     {
         button.Text = text;
         button.Width = width;
-        button.Height = 34;
-        button.Margin = new Padding(0, 0, 8, 0);
+        button.Height = 32;
+        button.Margin = new Padding(0, 0, 6, 4);
     }
 
-    private static void ConfigurePercentInput(
-        NumericUpDown input,
-        int value)
+    private static void ConfigurePixelInput(NumericUpDown input, int value)
+    {
+        input.Minimum = 1;
+        input.Maximum = 10000;
+        input.Value = value;
+        input.Width = 62;
+        input.Height = 32;
+        input.Margin = new Padding(0, 2, 6, 4);
+    }
+
+    private static void ConfigurePercentInput(NumericUpDown input, int value)
     {
         input.Minimum = 1;
         input.Maximum = 99;
         input.Value = value;
-        input.Width = 58;
-        input.Height = 34;
-        input.Margin = new Padding(0, 3, 8, 0);
+        input.Width = 52;
+        input.Height = 32;
+        input.Margin = new Padding(0, 2, 6, 4);
     }
 
     private static Label CreateToolbarLabel(string text, int width)
@@ -184,7 +221,8 @@ public sealed class GramStainAnalysisForm : Form
         {
             Text = text,
             Width = width,
-            Height = 34,
+            Height = 32,
+            Margin = new Padding(0, 0, 2, 4),
             TextAlign = ContentAlignment.MiddleRight,
             Tag = "text"
         };
@@ -198,12 +236,12 @@ public sealed class GramStainAnalysisForm : Form
             ColumnCount = 1,
             RowCount = 6,
             BackColor = Theme.Surface,
-            Padding = new Padding(12)
+            Padding = new Padding(10)
         };
         panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 24F));
-        panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 170F));
+        panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 160F));
         panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 28F));
-        panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 120F));
+        panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 112F));
         panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 28F));
         panel.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
 
@@ -219,7 +257,7 @@ public sealed class GramStainAnalysisForm : Form
         _countGrid.Columns.Add("class", "分類");
         _countGrid.Columns.Add("count", "数");
         _countGrid.Columns[0].AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill;
-        _countGrid.Columns[1].Width = 70;
+        _countGrid.Columns[1].Width = 58;
 
         _candidateList.Dock = DockStyle.Fill;
         _candidateList.HorizontalScrollbar = true;
@@ -233,8 +271,8 @@ public sealed class GramStainAnalysisForm : Form
         _objectGrid.Columns.Add("conf", "信頼");
         _objectGrid.Columns.Add("shape", "形状");
         _objectGrid.Columns[0].AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill;
-        _objectGrid.Columns[1].Width = 58;
-        _objectGrid.Columns[2].Width = 64;
+        _objectGrid.Columns[1].Width = 50;
+        _objectGrid.Columns[2].Width = 58;
 
         panel.Controls.Add(countTitle, 0, 0);
         panel.Controls.Add(_countGrid, 0, 1);
@@ -264,8 +302,8 @@ public sealed class GramStainAnalysisForm : Form
         grid.AutoSizeRowsMode = DataGridViewAutoSizeRowsMode.None;
         grid.ColumnHeadersHeightSizeMode =
             DataGridViewColumnHeadersHeightSizeMode.DisableResizing;
-        grid.ColumnHeadersHeight = 28;
-        grid.RowTemplate.Height = 26;
+        grid.ColumnHeadersHeight = 26;
+        grid.RowTemplate.Height = 24;
         grid.BorderStyle = BorderStyle.None;
     }
 
@@ -341,13 +379,25 @@ public sealed class GramStainAnalysisForm : Form
             return;
         }
 
+        SetSourceImage(image, path);
+    }
+
+    private void LoadBitmap(Bitmap bitmap, string sourceName)
+    {
+        using Bitmap clone = (Bitmap)bitmap.Clone();
+        Mat image = BitmapConverter.ToMat(clone);
+        SetSourceImage(image, sourceName);
+    }
+
+    private void SetSourceImage(Mat image, string sourceName)
+    {
         _sourceImage?.Dispose();
         _sourceImage = image;
         _lastResult?.Dispose();
         _lastResult = null;
         SetDisplayImage(image);
-        _fileLabel.Text = path;
-        _statusLabel.Text = "画像を読み込みました。解析ボタンを押してください。";
+        _fileLabel.Text = sourceName;
+        _statusLabel.Text = "画像を読み込みました。対象pxを確認してから解析してください。";
         _ruleAnalyzeButton.Enabled = true;
         _aiAnalyzeButton.Enabled = _yoloDetector is not null;
         ClearResults();
@@ -360,10 +410,24 @@ public sealed class GramStainAnalysisForm : Form
             return;
         }
 
+        GramStainRuleAnalysisOptions options = CreateRuleOptions();
         RunAnalysis(
             "ルール解析中...",
-            () => _analysisService.Analyze(_sourceImage),
+            () => _analysisService.Analyze(_sourceImage, options),
             "ルール解析");
+    }
+
+    private GramStainRuleAnalysisOptions CreateRuleOptions()
+    {
+        int min = decimal.ToInt32(_minTargetSizeInput.Value);
+        int max = decimal.ToInt32(_maxTargetSizeInput.Value);
+        if (max < min)
+        {
+            max = min;
+            _maxTargetSizeInput.Value = max;
+        }
+
+        return new GramStainRuleAnalysisOptions(min, max);
     }
 
     private void AiAnalyzeButton_Click(object? sender, EventArgs e)
@@ -419,6 +483,146 @@ public sealed class GramStainAnalysisForm : Form
         _imageBox.Image = next;
         _displayImage?.Dispose();
         _displayImage = next;
+        _imageBox.Invalidate();
+    }
+
+    private void ImageBox_MouseDown(object? sender, MouseEventArgs e)
+    {
+        if (e.Button != MouseButtons.Left || _sourceImage is null)
+        {
+            return;
+        }
+
+        _isDraggingMeasure = true;
+        _dragStart = e.Location;
+        _dragEnd = e.Location;
+        _imageBox.Invalidate();
+    }
+
+    private void ImageBox_MouseMove(object? sender, MouseEventArgs e)
+    {
+        if (!_isDraggingMeasure)
+        {
+            return;
+        }
+
+        _dragEnd = e.Location;
+        _imageBox.Invalidate();
+    }
+
+    private void ImageBox_MouseUp(object? sender, MouseEventArgs e)
+    {
+        if (!_isDraggingMeasure || _sourceImage is null)
+        {
+            return;
+        }
+
+        _isDraggingMeasure = false;
+        _dragEnd = e.Location;
+        if (!TryMapClientPointToImage(_dragStart, out DrawingPoint imageStart) ||
+            !TryMapClientPointToImage(_dragEnd, out DrawingPoint imageEnd))
+        {
+            _imageBox.Invalidate();
+            return;
+        }
+
+        int width = Math.Abs(imageEnd.X - imageStart.X);
+        int height = Math.Abs(imageEnd.Y - imageStart.Y);
+        int longSide = Math.Max(width, height);
+        if (longSide <= 0)
+        {
+            _imageBox.Invalidate();
+            return;
+        }
+
+        int min = Math.Max(1, (int)Math.Round(longSide * 0.6));
+        int max = Math.Max(min, (int)Math.Round(longSide * 1.6));
+        _minTargetSizeInput.Value = Math.Clamp(min, 1, 10000);
+        _maxTargetSizeInput.Value = Math.Clamp(max, 1, 10000);
+        _measureLabel.Text =
+            $"測定: {width}x{height}px 長辺{longSide}px -> 対象px {min}-{max}";
+        _imageBox.Invalidate();
+    }
+
+    private void ImageBox_Paint(object? sender, PaintEventArgs e)
+    {
+        if (!_isDraggingMeasure)
+        {
+            return;
+        }
+
+        DrawingRectangle rect = NormalizeRectangle(_dragStart, _dragEnd);
+        if (rect.Width <= 0 || rect.Height <= 0)
+        {
+            return;
+        }
+
+        using var pen = new Pen(Color.FromArgb(255, 45, 212, 191), 2);
+        e.Graphics.DrawRectangle(pen, rect);
+    }
+
+    private bool TryMapClientPointToImage(
+        DrawingPoint clientPoint,
+        out DrawingPoint imagePoint)
+    {
+        imagePoint = DrawingPoint.Empty;
+        if (_sourceImage is null || _imageBox.ClientSize.Width <= 0 ||
+            _imageBox.ClientSize.Height <= 0)
+        {
+            return false;
+        }
+
+        DrawingRectangle imageRect = GetZoomedImageRectangle(
+            _imageBox.ClientSize,
+            new DrawingSize(_sourceImage.Width, _sourceImage.Height));
+        if (!imageRect.Contains(clientPoint))
+        {
+            return false;
+        }
+
+        double scaleX = _sourceImage.Width / (double)imageRect.Width;
+        double scaleY = _sourceImage.Height / (double)imageRect.Height;
+        int x = (int)Math.Round((clientPoint.X - imageRect.Left) * scaleX);
+        int y = (int)Math.Round((clientPoint.Y - imageRect.Top) * scaleY);
+        imagePoint = new DrawingPoint(
+            Math.Clamp(x, 0, _sourceImage.Width - 1),
+            Math.Clamp(y, 0, _sourceImage.Height - 1));
+        return true;
+    }
+
+    private static DrawingRectangle GetZoomedImageRectangle(
+        DrawingSize container,
+        DrawingSize image)
+    {
+        if (image.Width <= 0 || image.Height <= 0 ||
+            container.Width <= 0 || container.Height <= 0)
+        {
+            return DrawingRectangle.Empty;
+        }
+
+        double scale = Math.Min(
+            container.Width / (double)image.Width,
+            container.Height / (double)image.Height);
+        int width = Math.Max(1, (int)Math.Round(image.Width * scale));
+        int height = Math.Max(1, (int)Math.Round(image.Height * scale));
+        return new DrawingRectangle(
+            (container.Width - width) / 2,
+            (container.Height - height) / 2,
+            width,
+            height);
+    }
+
+    private static DrawingRectangle NormalizeRectangle(
+        DrawingPoint a,
+        DrawingPoint b)
+    {
+        int left = Math.Min(a.X, b.X);
+        int top = Math.Min(a.Y, b.Y);
+        return new DrawingRectangle(
+            left,
+            top,
+            Math.Abs(a.X - b.X),
+            Math.Abs(a.Y - b.Y));
     }
 
     private void ClearResults()

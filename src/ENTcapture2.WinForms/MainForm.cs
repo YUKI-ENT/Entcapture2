@@ -4104,8 +4104,16 @@ public partial class MainForm : Form
         string directory = string.IsNullOrWhiteSpace(_settings.SnapshotDirectory)
             ? ApplicationSettings.CreateDefault().SnapshotDirectory
             : _settings.SnapshotDirectory;
-        var form = new GramStainAnalysisForm(directory);
+        using Bitmap? currentImage = CloneCurrentDisplayedImage();
+        var form = new GramStainAnalysisForm(directory, currentImage);
         form.Show(this);
+    }
+
+    private Bitmap? CloneCurrentDisplayedImage()
+    {
+        return _displayedImage is null
+            ? null
+            : (Bitmap)_displayedImage.Clone();
     }
 
     private void OpenSnapshotFolderButton_Click(object? sender, EventArgs e)

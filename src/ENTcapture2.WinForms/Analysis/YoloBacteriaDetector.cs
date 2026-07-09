@@ -431,16 +431,16 @@ internal sealed class YoloBacteriaDetector : IDisposable
         foreach (GramStainDetection detection in detections)
         {
             Scalar color = GetOverlayColor(detection);
-            Cv2.Rectangle(image, detection.Bounds, color, 2);
+            Cv2.Rectangle(image, detection.Bounds, color, 3);
             string label = $"{detection.ShortLabel} {detection.Confidence:0.00}";
             Cv2.PutText(
                 image,
                 label,
                 new CvPoint(detection.Bounds.Left, Math.Max(12, detection.Bounds.Top - 3)),
                 HersheyFonts.HersheySimplex,
-                0.42,
+                0.48,
                 color,
-                1,
+                2,
                 LineTypes.AntiAlias);
         }
     }
@@ -450,14 +450,14 @@ internal sealed class YoloBacteriaDetector : IDisposable
         return (detection.Gram, detection.Shape) switch
         {
             (GramStainPolarity.Positive, BacteriumShape.Coccus) =>
-                new Scalar(220, 90, 210),
+                new Scalar(255, 220, 0),
             (GramStainPolarity.Negative, BacteriumShape.Coccus) =>
-                new Scalar(90, 120, 255),
+                new Scalar(255, 150, 0),
             (GramStainPolarity.Positive, BacteriumShape.Bacillus) =>
-                new Scalar(255, 70, 160),
+                new Scalar(120, 255, 0),
             (GramStainPolarity.Negative, BacteriumShape.Bacillus) =>
-                new Scalar(50, 190, 255),
-            _ => new Scalar(120, 220, 220)
+                new Scalar(255, 255, 0),
+            _ => new Scalar(0, 255, 180)
         };
     }
 

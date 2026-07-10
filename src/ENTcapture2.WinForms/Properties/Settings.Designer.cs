@@ -22,5 +22,29 @@ namespace ENTcapture2.WinForms.Properties {
                 return defaultInstance;
             }
         }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("")]
+        public string YoloOnnxModelPath {
+            get {
+                return ((string)(this["YoloOnnxModelPath"]));
+            }
+            set {
+                this["YoloOnnxModelPath"] = value;
+            }
+        }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("")]
+        public string YoloDatasetDirectory {
+            get {
+                return ((string)(this["YoloDatasetDirectory"]));
+            }
+            set {
+                this["YoloDatasetDirectory"] = value;
+            }
+        }
     }
 }

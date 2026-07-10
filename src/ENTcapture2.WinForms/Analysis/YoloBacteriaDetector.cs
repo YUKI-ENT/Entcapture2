@@ -38,16 +38,8 @@ internal sealed class YoloBacteriaDetector : IDisposable
         }
 
         using Mat bgr = EnsureBgr(source);
-        LetterboxImage letterbox = CreateLetterbox(bgr);
-        using Mat inputImage = letterbox.Image;
-        DenseTensor<float> tensor = CreateInputTensor(inputImage);
-        using IDisposableReadOnlyCollection<DisposableNamedOnnxValue> outputs =
-            _session.Run([NamedOnnxValue.CreateFromTensor(_inputName, tensor)]);
-        Tensor<float> output = outputs.First().AsTensor<float>();
-        List<YoloCandidate> candidates = ParseOutput(
-            output,
-            letterbox,
-            bgr.Size(),
+        List<YoloCandidate> candidates = DetectCandidates(
+            bgr,
             Math.Clamp(confidenceThreshold, 0.01F, 0.99F));
         List<YoloCandidate> selected = ApplyNms(
             candidates,
@@ -62,6 +54,52 @@ internal sealed class YoloBacteriaDetector : IDisposable
             detections,
             CreateCounts(detections),
             CreateCandidateSummary(detections),
+            overlay);
+    }
+
+    public GramStainAnalysisResult AnalyzeTiled(
+        Mat source,
+        float confidenceThreshold,
+        float iouThreshold,
+        int tileSize = DefaultInputSize,
+        int stride = 512)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (source.Empty())
+        {
+            throw new ArgumentException("画像が空です。", nameof(source));
+        }
+
+        using Mat bgr = EnsureBgr(source);
+        int effectiveTileWidth = Math.Min(Math.Max(1, tileSize), bgr.Width);
+        int effectiveTileHeight = Math.Min(Math.Max(1, tileSize), bgr.Height);
+        var candidates = new List<YoloCandidate>();
+        foreach (int y in CreateTilePositions(bgr.Height, effectiveTileHeight, stride))
+        {
+            foreach (int x in CreateTilePositions(bgr.Width, effectiveTileWidth, stride))
+            {
+                using Mat roi = new(
+                    bgr,
+                    new Rect(x, y, effectiveTileWidth, effectiveTileHeight));
+                candidates.AddRange(
+                    DetectCandidates(roi, Math.Clamp(confidenceThreshold, 0.01F, 0.99F))
+                        .Select(candidate => OffsetCandidate(candidate, x, y, bgr.Size())));
+            }
+        }
+
+        List<YoloCandidate> selected = ApplyNms(
+            candidates,
+            Math.Clamp(iouThreshold, 0.01F, 0.99F));
+        List<GramStainDetection> detections = selected
+            .Select(ToDetection)
+            .ToList();
+        Mat overlay = bgr.Clone();
+        DrawOverlay(overlay, detections);
+
+        return new GramStainAnalysisResult(
+            detections,
+            CreateCounts(detections),
+            CreateTiledCandidateSummary(detections, candidates.Count),
             overlay);
     }
 
@@ -130,6 +168,23 @@ internal sealed class YoloBacteriaDetector : IDisposable
             new Rect(padX, padY, resizedWidth, resizedHeight));
         resized.CopyTo(roi);
         return new LetterboxImage(canvas, scale, padX, padY);
+    }
+
+    private List<YoloCandidate> DetectCandidates(
+        Mat bgr,
+        float confidenceThreshold)
+    {
+        LetterboxImage letterbox = CreateLetterbox(bgr);
+        using Mat inputImage = letterbox.Image;
+        DenseTensor<float> tensor = CreateInputTensor(inputImage);
+        using IDisposableReadOnlyCollection<DisposableNamedOnnxValue> outputs =
+            _session.Run([NamedOnnxValue.CreateFromTensor(_inputName, tensor)]);
+        Tensor<float> output = outputs.First().AsTensor<float>();
+        return ParseOutput(
+            output,
+            letterbox,
+            bgr.Size(),
+            confidenceThreshold);
     }
 
     private DenseTensor<float> CreateInputTensor(Mat bgr)
@@ -334,6 +389,49 @@ internal sealed class YoloBacteriaDetector : IDisposable
         return selected;
     }
 
+    private static IEnumerable<int> CreateTilePositions(int fullSize, int tileSize, int stride)
+    {
+        if (fullSize <= tileSize)
+        {
+            yield return 0;
+            yield break;
+        }
+
+        var positions = new List<int>();
+        int step = Math.Clamp(stride, 1, tileSize);
+        for (int position = 0; position <= fullSize - tileSize; position += step)
+        {
+            positions.Add(position);
+        }
+
+        int last = fullSize - tileSize;
+        if (positions.Count == 0 || positions[^1] != last)
+        {
+            positions.Add(last);
+        }
+
+        foreach (int position in positions)
+        {
+            yield return position;
+        }
+    }
+
+    private static YoloCandidate OffsetCandidate(
+        YoloCandidate candidate,
+        int offsetX,
+        int offsetY,
+        CvSize fullSize)
+    {
+        int left = Math.Clamp(candidate.Bounds.Left + offsetX, 0, fullSize.Width - 1);
+        int top = Math.Clamp(candidate.Bounds.Top + offsetY, 0, fullSize.Height - 1);
+        int right = Math.Clamp(candidate.Bounds.Right + offsetX, left + 1, fullSize.Width);
+        int bottom = Math.Clamp(candidate.Bounds.Bottom + offsetY, top + 1, fullSize.Height);
+        return candidate with
+        {
+            Bounds = new Rect(left, top, right - left, bottom - top)
+        };
+    }
+
     private static double CalculateIou(Rect a, Rect b)
     {
         int left = Math.Max(a.Left, b.Left);
@@ -421,6 +519,17 @@ internal sealed class YoloBacteriaDetector : IDisposable
             candidates.Add("G-桿菌: Enterobacterales/Pseudomonas などの候補。");
         }
 
+        return candidates;
+    }
+
+    private static IReadOnlyList<string> CreateTiledCandidateSummary(
+        IReadOnlyList<GramStainDetection> detections,
+        int rawCandidateCount)
+    {
+        List<string> candidates = [.. CreateCandidateSummary(detections)];
+        candidates.Insert(
+            1,
+            $"tile解析: 640px tile / stride 512pxで推論し、重なり領域はNMSで統合しました。統合前候補 {rawCandidateCount} 個。");
         return candidates;
     }
 

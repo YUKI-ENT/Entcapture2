@@ -10,6 +10,7 @@ EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "ソリューション項目", "ソリューション項目", "{A7E4B5C2-EA89-4AF8-B2F9-5DD31562775D}"
 	ProjectSection(SolutionItems) = preProject
 		Directory.Build.props = Directory.Build.props
+		docs\yolo_correct1.md = docs\yolo_correct1.md
 		docs\yolo_dataset_annotation_spec_manual_first.md = docs\yolo_dataset_annotation_spec_manual_first.md
 	EndProjectSection
 EndProject

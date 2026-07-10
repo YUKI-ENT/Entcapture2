@@ -326,7 +326,7 @@ public partial class MainForm : Form
         _toggleSidePanelButton.Margin = ScaleDpi(new Padding(1));
         ConfigureModernButton(
             _openGramStainAnalysisButton,
-            "細菌解析",
+            "AI解析",
             Theme.Accent);
 
         ConfigureCard(filterCard);

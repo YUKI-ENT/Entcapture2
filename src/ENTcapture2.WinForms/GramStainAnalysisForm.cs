@@ -102,7 +102,7 @@ public sealed class GramStainAnalysisForm : Form
 
     private void InitializeLayout()
     {
-        Text = "細菌解析";
+        Text = "AI解析";
         StartPosition = FormStartPosition.CenterParent;
         MinimumSize = new DrawingSize(1020, 700);
         ClientSize = new DrawingSize(1220, 820);
@@ -546,7 +546,7 @@ public sealed class GramStainAnalysisForm : Form
             MessageBox.Show(
                 this,
                 $"ONNXモデルを読み込めませんでした。\r\n{exception.Message}",
-                "細菌解析",
+                "AI解析",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Error);
         }
@@ -560,7 +560,7 @@ public sealed class GramStainAnalysisForm : Form
             MessageBox.Show(
                 this,
                 "画像を読み込めませんでした。",
-                "細菌解析",
+                "AI解析",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Warning);
             image.Dispose();
@@ -660,7 +660,7 @@ public sealed class GramStainAnalysisForm : Form
             MessageBox.Show(
                 this,
                 $"{label}に失敗しました。\r\n{exception.Message}",
-                "細菌解析",
+                "AI解析",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Error);
             _statusLabel.Text = $"{label}に失敗しました";

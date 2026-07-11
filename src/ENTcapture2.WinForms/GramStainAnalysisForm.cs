@@ -28,7 +28,6 @@ public sealed class GramStainAnalysisForm : Form
     private readonly ComboBox _cropAnchorCombo = new();
     private readonly Button _clearCropButton = new();
     private readonly Button _startTileButton = new();
-    private readonly Button _editTileButton = new();
     private readonly Button _saveTileButton = new();
     private readonly Button _saveEmptyTileButton = new();
     private readonly Button _skipTileButton = new();
@@ -66,6 +65,7 @@ public sealed class GramStainAnalysisForm : Form
     private readonly Dictionary<int, SavedDatasetFiles> _savedTileFiles = [];
     private readonly HashSet<int> _savedTileIndexes = [];
     private readonly HashSet<int> _skippedTileIndexes = [];
+    private readonly List<YoloAnnotationBox> _aiAnnotationsOnOriginal = [];
     private int _currentTileIndex = -1;
     private readonly HashSet<int> _selectedDetectionIndexes = [];
     private string? _currentAnalysisLabel;
@@ -73,6 +73,7 @@ public sealed class GramStainAnalysisForm : Form
     private int? _selectedAnnotationId;
     private bool _annotationsDirty;
     private readonly List<YoloAnnotationBox> _annotations = [];
+    private IReadOnlyList<YoloAnnotationClass> _annotationClasses = [];
     private readonly ContextMenuStrip _annotationMenu = new();
 
     public GramStainAnalysisForm(string defaultDirectory, Bitmap? initialImage = null)
@@ -175,7 +176,6 @@ public sealed class GramStainAnalysisForm : Form
         Theme.ApplyButton(_showAllDetectionsButton);
         Theme.ApplyButton(_clearCropButton);
         Theme.ApplyButton(_startTileButton, true);
-        Theme.ApplyButton(_editTileButton);
         Theme.ApplyButton(_saveTileButton, true);
         Theme.ApplyButton(_saveEmptyTileButton);
         Theme.ApplyButton(_skipTileButton);
@@ -245,9 +245,6 @@ public sealed class GramStainAnalysisForm : Form
         ConfigureToolbarButton(_startTileButton, "tile開始", 82);
         _startTileButton.Enabled = false;
         _startTileButton.Click += StartTileButton_Click;
-        ConfigureToolbarButton(_editTileButton, "編集", 58);
-        _editTileButton.Enabled = false;
-        _editTileButton.Click += EditTileButton_Click;
         ConfigureToolbarButton(_saveTileButton, "YOLO保存", 86);
         _saveTileButton.Enabled = false;
         _saveTileButton.Click += SaveTileButton_Click;
@@ -291,12 +288,7 @@ public sealed class GramStainAnalysisForm : Form
         _selectedDetectionsOnlyCheck.CheckedChanged += (_, _) => RefreshDetectionOverlay();
 
         ConfigureCombo(_annotationClassCombo, 112);
-        foreach (YoloAnnotationClass annotationClass in YoloAnnotationClass.All)
-        {
-            _annotationClassCombo.Items.Add(annotationClass);
-        }
-
-        _annotationClassCombo.SelectedIndex = 1;
+        ReloadAnnotationClassCombo();
         ConfigureCombo(_datasetSplitCombo, 62);
         _datasetSplitCombo.Items.AddRange(["train", "val"]);
         _datasetSplitCombo.SelectedIndex = 0;
@@ -331,14 +323,14 @@ public sealed class GramStainAnalysisForm : Form
         analysisToolbar.Controls.Add(_clearBoxesButton);
         analysisToolbar.Controls.Add(_selectedDetectionsOnlyCheck);
         analysisToolbar.Controls.Add(_showAllDetectionsButton);
-        analysisToolbar.Controls.Add(CreateToolbarLabel("Conf%", 48));
-        analysisToolbar.Controls.Add(_confidenceInput);
-        analysisToolbar.Controls.Add(CreateToolbarLabel("IoU%", 40));
-        analysisToolbar.Controls.Add(_iouInput);
         analysisToolbar.Controls.Add(CreateToolbarLabel("倍率", 36));
         analysisToolbar.Controls.Add(_zoomCombo);
         analysisToolbar.Controls.Add(_fileLabel);
         analysisToolbar.Controls.Add(_modelLabel);
+        analysisToolbar.Controls.Add(CreateToolbarLabel("Conf%", 48));
+        analysisToolbar.Controls.Add(_confidenceInput);
+        analysisToolbar.Controls.Add(CreateToolbarLabel("IoU%", 40));
+        analysisToolbar.Controls.Add(_iouInput);
 
         annotationToolbar.Controls.Add(_annotationModeCheck);
         annotationToolbar.Controls.Add(CreateToolbarLabel("crop", 36));
@@ -347,11 +339,9 @@ public sealed class GramStainAnalysisForm : Form
         annotationToolbar.Controls.Add(_clearCropButton);
         annotationToolbar.Controls.Add(CreateToolbarLabel("ラベル", 44));
         annotationToolbar.Controls.Add(_annotationClassCombo);
-        annotationToolbar.Controls.Add(CreateToolbarLabel("保存", 36));
         annotationToolbar.Controls.Add(_datasetSplitCombo);
         annotationToolbar.Controls.Add(_datasetDirectoryBox);
         annotationToolbar.Controls.Add(_browseDatasetButton);
-        annotationToolbar.Controls.Add(_saveDatasetButton);
 
         tileToolbar.Controls.Add(CreateToolbarLabel("tile", 36));
         tileToolbar.Controls.Add(_startTileButton);
@@ -360,8 +350,6 @@ public sealed class GramStainAnalysisForm : Form
         tileToolbar.Controls.Add(_saveTileButton);
         tileToolbar.Controls.Add(_previousTileButton);
         tileToolbar.Controls.Add(_nextTileButton);
-        tileToolbar.Controls.Add(_editTileButton);
-        tileToolbar.Controls.Add(CreateToolbarLabel("設定", 36));
         tileToolbar.Controls.Add(CreateToolbarLabel("640 / stride 512 / overlap 128", 210));
 
         toolbar.Controls.Add(analysisToolbar, 0, 0);
@@ -535,7 +523,7 @@ public sealed class GramStainAnalysisForm : Form
             Properties.Settings.Default.YoloOnnxModelPath = dialog.FileName;
             SaveYoloSettings();
             _statusLabel.Text =
-                "AIモデルを読み込みました。クラス順は G-cocci, G+cocci, G-bacilli, G+bacilli を想定します。";
+                $"AIモデルを読み込みました。yamlクラス {_annotationClasses.Count} 件: {string.Join(", ", _annotationClasses.Take(6).Select(item => item.YoloName))}";
         }
         catch (Exception exception)
         {
@@ -592,6 +580,7 @@ public sealed class GramStainAnalysisForm : Form
         _savedTileFiles.Clear();
         _savedTileIndexes.Clear();
         _skippedTileIndexes.Clear();
+        _aiAnnotationsOnOriginal.Clear();
         _currentTileIndex = -1;
         _selectedDetectionIndexes.Clear();
         _currentAnalysisLabel = null;
@@ -647,13 +636,16 @@ public sealed class GramStainAnalysisForm : Form
             _lastResult = analyze();
             _currentAnalysisLabel = label;
             _selectedDetectionIndexes.Clear();
+            bool importedAnnotations = ImportDetectionsAsAnnotations(_lastResult.Detections);
             using Mat overlay = CreateDetectionOverlay(sourceImage, _lastResult.Detections);
             SetDisplayImage(overlay);
             PopulateResults(_lastResult);
             UpdateDetectionControls();
             _clearBoxesButton.Enabled = true;
             _statusLabel.Text =
-                $"{label}完了: 検出候補 {_lastResult.Counts.Total} 個。結果は参考値です。";
+                importedAnnotations
+                    ? $"{label}完了: 検出候補 {_lastResult.Counts.Total} 個を編集用boxへ取り込みました。"
+                    : $"{label}完了: 検出候補 {_lastResult.Counts.Total} 個。編集中boxは保持しました。";
         }
         catch (Exception exception)
         {
@@ -774,14 +766,138 @@ public sealed class GramStainAnalysisForm : Form
 
     private static Color GetDetectionColor(GramStainDetection detection)
     {
-        return (detection.Gram, detection.Shape) switch
+        return GetClassPaletteColor(detection.ClassId);
+    }
+
+    private static Color GetClassPaletteColor(int classId)
+    {
+        Color[] palette =
+        [
+            Color.Cyan,
+            Color.Magenta,
+            Color.Lime,
+            Color.Orange,
+            Color.Yellow,
+            Color.DeepSkyBlue,
+            Color.HotPink,
+            Color.SpringGreen
+        ];
+        return palette[Math.Abs(classId) % palette.Length];
+    }
+
+    private bool ImportDetectionsAsAnnotations(IReadOnlyList<GramStainDetection> detections)
+    {
+        if (_sourceImage is null)
         {
-            (GramStainPolarity.Positive, BacteriumShape.Coccus) => Color.Magenta,
-            (GramStainPolarity.Negative, BacteriumShape.Coccus) => Color.Cyan,
-            (GramStainPolarity.Positive, BacteriumShape.Bacillus) => Color.Orange,
-            (GramStainPolarity.Negative, BacteriumShape.Bacillus) => Color.Lime,
-            _ => Color.Yellow
-        };
+            return false;
+        }
+
+        if (_annotationsDirty && _annotations.Count > 0)
+        {
+            return false;
+        }
+
+        if (detections.Count == 0)
+        {
+            _annotations.Clear();
+            _aiAnnotationsOnOriginal.Clear();
+            _selectedAnnotationId = null;
+            _annotationsDirty = false;
+            return false;
+        }
+
+        DrawingRectangle sourceBoundsOnOriginal = GetCurrentSourceBoundsOnOriginal();
+        List<YoloAnnotationBox> imported = [];
+        foreach (GramStainDetection detection in detections)
+        {
+            DrawingRectangle bounds = new(
+                detection.Bounds.Left,
+                detection.Bounds.Top,
+                detection.Bounds.Width,
+                detection.Bounds.Height);
+            if (bounds.Width < 1 || bounds.Height < 1)
+            {
+                continue;
+            }
+
+            YoloAnnotationClass annotationClass = FindAnnotationClass(
+                detection.ClassId,
+                detection.ClassName ?? detection.DisplayClass);
+            imported.Add(new YoloAnnotationBox(
+                _nextAnnotationId++,
+                ClampImageRectangle(bounds),
+                annotationClass,
+                DateTimeOffset.Now,
+                "ai",
+                detection.Confidence,
+                detection.ClassId));
+        }
+
+        _annotations.Clear();
+        _annotations.AddRange(imported);
+        _selectedAnnotationId = null;
+        _annotationsDirty = imported.Count > 0;
+        if (_activeTile is not null)
+        {
+            SaveCurrentTileDraft();
+        }
+
+        UpdateAiAnnotationsOnOriginal(imported, sourceBoundsOnOriginal);
+        return imported.Count > 0;
+    }
+
+    private DrawingRectangle GetCurrentSourceBoundsOnOriginal()
+    {
+        if (_sourceImage is null)
+        {
+            return DrawingRectangle.Empty;
+        }
+
+        return _activeCropBoundsOnOriginal ??
+            new DrawingRectangle(0, 0, _sourceImage.Width, _sourceImage.Height);
+    }
+
+    private void UpdateAiAnnotationsOnOriginal(
+        IReadOnlyList<YoloAnnotationBox> annotations,
+        DrawingRectangle sourceBoundsOnOriginal)
+    {
+        if (_originalImage is null || annotations.Count == 0)
+        {
+            return;
+        }
+
+        _aiAnnotationsOnOriginal.Clear();
+        int nextId = 1;
+        foreach (YoloAnnotationBox annotation in annotations)
+        {
+            DrawingRectangle originalBounds = new(
+                annotation.Bounds.Left + sourceBoundsOnOriginal.Left,
+                annotation.Bounds.Top + sourceBoundsOnOriginal.Top,
+                annotation.Bounds.Width,
+                annotation.Bounds.Height);
+            originalBounds = ClampRectangleToSize(
+                originalBounds,
+                _originalImage.Width,
+                _originalImage.Height);
+            _aiAnnotationsOnOriginal.Add(annotation with
+            {
+                Id = nextId++,
+                Bounds = originalBounds
+            });
+        }
+    }
+
+    private YoloAnnotationClass FindAnnotationClass(int classId, string className)
+    {
+        YoloAnnotationClass? byId = _annotationClasses.FirstOrDefault(item => item.Id == classId);
+        if (byId is not null)
+        {
+            return byId;
+        }
+
+        YoloAnnotationClass? byName = _annotationClasses.FirstOrDefault(item =>
+            string.Equals(item.YoloName, className, StringComparison.OrdinalIgnoreCase));
+        return byName ?? GetSelectedAnnotationClass();
     }
 
     private void SetDisplayImage(Mat image)
@@ -844,8 +960,32 @@ public sealed class GramStainAnalysisForm : Form
     {
         _yoloDetector?.Dispose();
         _yoloDetector = new YoloBacteriaDetector(modelPath);
+        _annotationClasses = _yoloDetector.Classes
+            .Select(item => new YoloAnnotationClass(
+                item.Id,
+                item.Name,
+                item.Name,
+                CreateShortClassName(item.Name)))
+            .ToList();
+        ReloadAnnotationClassCombo();
+        BuildAnnotationMenu();
         _modelLabel.Text = Path.GetFileName(modelPath);
         _aiAnalyzeButton.Enabled = _sourceImage is not null;
+    }
+
+    private void ReloadAnnotationClassCombo()
+    {
+        _annotationClassCombo.Items.Clear();
+        foreach (YoloAnnotationClass annotationClass in _annotationClasses)
+        {
+            _annotationClassCombo.Items.Add(annotationClass);
+        }
+
+        _annotationClassCombo.Enabled = _annotationClassCombo.Items.Count > 0;
+        if (_annotationClassCombo.Items.Count > 0)
+        {
+            _annotationClassCombo.SelectedIndex = Math.Min(1, _annotationClassCombo.Items.Count - 1);
+        }
     }
 
     private void SaveYoloSettings()
@@ -929,6 +1069,7 @@ public sealed class GramStainAnalysisForm : Form
         _isDraggingAnnotation = false;
         _selectedDetectionIndexes.Clear();
         _currentAnalysisLabel = null;
+        _aiAnnotationsOnOriginal.Clear();
 
         _lastResult?.Dispose();
         _lastResult = null;
@@ -987,6 +1128,7 @@ public sealed class GramStainAnalysisForm : Form
 
         _tileCandidates.Clear();
         _tileAnnotationDrafts.Clear();
+        _savedTileFiles.Clear();
         _savedTileIndexes.Clear();
         _skippedTileIndexes.Clear();
         _tileCandidates.AddRange(CreateTileCandidates(_originalImage.Width, _originalImage.Height));
@@ -996,20 +1138,15 @@ public sealed class GramStainAnalysisForm : Form
             return;
         }
 
-        _currentTileIndex = 0;
-        ShowCurrentTile();
-    }
-
-    private void EditTileButton_Click(object? sender, EventArgs e)
-    {
-        if (_activeTile is null)
+        if (_annotations.Count > 0)
         {
-            return;
+            UpdateAiAnnotationsOnOriginal(_annotations, GetCurrentSourceBoundsOnOriginal());
         }
 
+        SeedTileDraftsFromAiAnnotations();
+        _currentTileIndex = 0;
         _annotationModeCheck.Checked = true;
-        _statusLabel.Text =
-            $"tile {_currentTileIndex + 1}/{_tileCandidates.Count}: ラベル編集できます。";
+        ShowCurrentTile();
     }
 
     private void SaveEmptyTileButton_Click(object? sender, EventArgs e)
@@ -1040,6 +1177,7 @@ public sealed class GramStainAnalysisForm : Form
     {
         if (_activeTile is null)
         {
+            SaveDatasetButton_Click(sender, e);
             return;
         }
 
@@ -1167,6 +1305,7 @@ public sealed class GramStainAnalysisForm : Form
         SetZoomFit();
         _clearCropButton.Enabled = true;
         _saveDatasetButton.Enabled = true;
+        _annotationModeCheck.Checked = true;
         UpdateTileButtons();
         string tileText = CreateCurrentTileStatusText();
         _statusLabel.Text = string.IsNullOrWhiteSpace(prefix)
@@ -1198,6 +1337,53 @@ public sealed class GramStainAnalysisForm : Form
         _nextAnnotationId = _annotations.Count == 0
             ? 1
             : _annotations.Max(item => item.Id) + 1;
+    }
+
+    private void SeedTileDraftsFromAiAnnotations()
+    {
+        if (_aiAnnotationsOnOriginal.Count == 0)
+        {
+            return;
+        }
+
+        _tileAnnotationDrafts.Clear();
+        foreach (TileCandidate tile in _tileCandidates)
+        {
+            List<YoloAnnotationBox> annotations = CreateAnnotationsForSourceBounds(tile.Bounds);
+            if (annotations.Count > 0)
+            {
+                _tileAnnotationDrafts[tile.Index] = annotations;
+            }
+        }
+    }
+
+    private List<YoloAnnotationBox> CreateAnnotationsForSourceBounds(DrawingRectangle sourceBoundsOnOriginal)
+    {
+        var annotations = new List<YoloAnnotationBox>();
+        int nextId = 1;
+        foreach (YoloAnnotationBox annotation in _aiAnnotationsOnOriginal)
+        {
+            DrawingRectangle intersection = DrawingRectangle.Intersect(
+                annotation.Bounds,
+                sourceBoundsOnOriginal);
+            if (intersection.Width < 2 || intersection.Height < 2)
+            {
+                continue;
+            }
+
+            DrawingRectangle localBounds = new(
+                intersection.Left - sourceBoundsOnOriginal.Left,
+                intersection.Top - sourceBoundsOnOriginal.Top,
+                intersection.Width,
+                intersection.Height);
+            annotations.Add(annotation with
+            {
+                Id = nextId++,
+                Bounds = localBounds
+            });
+        }
+
+        return annotations;
     }
 
     private string CreateCurrentTileStatusText()
@@ -1272,8 +1458,7 @@ public sealed class GramStainAnalysisForm : Form
     private void UpdateTileButtons()
     {
         bool hasTiles = _tileCandidates.Count > 0 && _activeTile is not null;
-        _editTileButton.Enabled = hasTiles;
-        _saveTileButton.Enabled = hasTiles;
+        _saveTileButton.Enabled = _sourceImage is not null;
         _saveEmptyTileButton.Enabled = hasTiles;
         _skipTileButton.Enabled = hasTiles;
         _previousTileButton.Enabled = hasTiles && _currentTileIndex > 0;
@@ -1300,7 +1485,9 @@ public sealed class GramStainAnalysisForm : Form
 
         if (_annotationModeCheck.Checked)
         {
-            if (_activeCropBoundsOnOriginal is null && _originalImage is not null)
+            if (_activeCropBoundsOnOriginal is null &&
+                _originalImage is not null &&
+                _annotations.Count == 0)
             {
                 CreateCropFromPoint(e.Location);
                 _imageBox.Invalidate();
@@ -1458,9 +1645,12 @@ public sealed class GramStainAnalysisForm : Form
         _sourceImage = crop;
         _activeCropBoundsOnOriginal = cropBounds;
         _annotations.Clear();
+        _annotations.AddRange(CreateAnnotationsForSourceBounds(cropBounds));
         _selectedAnnotationId = null;
-        _annotationsDirty = false;
-        _nextAnnotationId = 1;
+        _annotationsDirty = _annotations.Count > 0;
+        _nextAnnotationId = _annotations.Count == 0
+            ? 1
+            : _annotations.Max(item => item.Id) + 1;
         _lastResult?.Dispose();
         _lastResult = null;
         _cropPreviewPoint = null;
@@ -1469,7 +1659,7 @@ public sealed class GramStainAnalysisForm : Form
         SetZoomFit();
         _clearCropButton.Enabled = true;
         _statusLabel.Text =
-            $"crop作成: {cropBounds.Width}x{cropBounds.Height}px ({cropBounds.Left}, {cropBounds.Top})";
+            $"crop作成: {cropBounds.Width}x{cropBounds.Height}px ({cropBounds.Left}, {cropBounds.Top}) / AI候補 {_annotations.Count} 件";
     }
 
     private DrawingRectangle CreateCropBounds(DrawingPoint selectedPoint, int cropSize)
@@ -1555,7 +1745,7 @@ public sealed class GramStainAnalysisForm : Form
     private void BuildAnnotationMenu()
     {
         _annotationMenu.Items.Clear();
-        foreach (YoloAnnotationClass annotationClass in YoloAnnotationClass.All)
+        foreach (YoloAnnotationClass annotationClass in _annotationClasses)
         {
             ToolStripMenuItem item = new(annotationClass.DisplayName)
             {
@@ -1613,6 +1803,18 @@ public sealed class GramStainAnalysisForm : Form
         return DrawingRectangle.FromLTRB(left, top, right, bottom);
     }
 
+    private static DrawingRectangle ClampRectangleToSize(
+        DrawingRectangle bounds,
+        int width,
+        int height)
+    {
+        int left = Math.Clamp(bounds.Left, 0, Math.Max(0, width - 1));
+        int top = Math.Clamp(bounds.Top, 0, Math.Max(0, height - 1));
+        int right = Math.Clamp(bounds.Right, left + 1, width);
+        int bottom = Math.Clamp(bounds.Bottom, top + 1, height);
+        return DrawingRectangle.FromLTRB(left, top, right, bottom);
+    }
+
     private void PaintAnnotations(Graphics graphics)
     {
         foreach (YoloAnnotationBox annotation in _annotations)
@@ -1643,7 +1845,7 @@ public sealed class GramStainAnalysisForm : Form
 
     private void ShowAnnotationMenu(DrawingPoint location)
     {
-        if (!_annotationModeCheck.Checked || _activeCropBoundsOnOriginal is null)
+        if (!_annotationModeCheck.Checked)
         {
             return;
         }
@@ -1710,19 +1912,13 @@ public sealed class GramStainAnalysisForm : Form
     private YoloAnnotationClass GetSelectedAnnotationClass()
     {
         return _annotationClassCombo.SelectedItem as YoloAnnotationClass
-            ?? YoloAnnotationClass.All[0];
+            ?? _annotationClasses.FirstOrDefault()
+            ?? YoloAnnotationClass.DefaultClasses[0];
     }
 
     private static Color GetAnnotationColor(YoloAnnotationClass annotationClass)
     {
-        return annotationClass.Id switch
-        {
-            0 => Color.Cyan,
-            1 => Color.Magenta,
-            2 => Color.Lime,
-            3 => Color.Orange,
-            _ => Color.White
-        };
+        return GetClassPaletteColor(annotationClass.Id);
     }
 
     private void UpdateAnnotationStatus()
@@ -1904,7 +2100,7 @@ public sealed class GramStainAnalysisForm : Form
                     overlap = _activeTile.Overlap
                 },
             box_count = _annotations.Count,
-            classes = YoloAnnotationClass.All.Select(item => new
+            classes = _annotationClasses.Select(item => new
             {
                 id = item.Id,
                 name = item.YoloName,
@@ -1934,22 +2130,19 @@ public sealed class GramStainAnalysisForm : Form
             });
     }
 
-    private static string CreateDataYaml()
+    private string CreateDataYaml()
     {
-        return string.Join(
-            Environment.NewLine,
-            [
-                "path: .",
-                "train: images/train",
-                "val: images/val",
-                "nc: 4",
-                "names:",
-                "  0: G-cocci",
-                "  1: G+cocci",
-                "  2: G-bacilli",
-                "  3: G+bacilli",
-                ""
-            ]);
+        var lines = new List<string>
+        {
+            "path: .",
+            "train: images/train",
+            "val: images/val",
+            $"nc: {_annotationClasses.Count}",
+            "names:"
+        };
+        lines.AddRange(_annotationClasses.Select(item => $"  {item.Id}: {item.YoloName}"));
+        lines.Add(string.Empty);
+        return string.Join(Environment.NewLine, lines);
     }
 
     private void ClearResults()
@@ -1964,12 +2157,15 @@ public sealed class GramStainAnalysisForm : Form
     private void PopulateResults(GramStainAnalysisResult result)
     {
         ClearResults();
-        AddCountRow("G+ 球菌", result.Counts.GramPositiveCocci, GramStainPolarity.Positive, BacteriumShape.Coccus);
-        AddCountRow("G- 球菌", result.Counts.GramNegativeCocci, GramStainPolarity.Negative, BacteriumShape.Coccus);
-        AddCountRow("G+ 桿菌", result.Counts.GramPositiveBacilli, GramStainPolarity.Positive, BacteriumShape.Bacillus);
-        AddCountRow("G- 桿菌", result.Counts.GramNegativeBacilli, GramStainPolarity.Negative, BacteriumShape.Bacillus);
-        AddCountRow("不明/要確認", result.Counts.Uncertain, GramStainPolarity.Uncertain, BacteriumShape.Uncertain);
-        AddCountRow("合計", result.Counts.Total, null, null);
+        foreach (IGrouping<int, GramStainDetection> group in result.Detections
+                     .GroupBy(item => item.ClassId)
+                     .OrderByDescending(group => group.Count()))
+        {
+            GramStainDetection first = group.First();
+            AddCountRow(first.DisplayClass, group.Count(), first.ClassId);
+        }
+
+        AddCountRow("合計", result.Detections.Count, null);
 
         foreach (string candidate in result.CandidateSummary)
         {
@@ -1992,11 +2188,10 @@ public sealed class GramStainAnalysisForm : Form
     private void AddCountRow(
         string label,
         int count,
-        GramStainPolarity? gram,
-        BacteriumShape? shape)
+        int? classId)
     {
         int rowIndex = _countGrid.Rows.Add(label, count.ToString());
-        _countGrid.Rows[rowIndex].Tag = new DetectionClassFilter(gram, shape);
+        _countGrid.Rows[rowIndex].Tag = new DetectionClassFilter(classId);
     }
 
     private void ObjectGrid_SelectionChanged(object? sender, EventArgs e)
@@ -2066,25 +2261,11 @@ public sealed class GramStainAnalysisForm : Form
         double? Confidence = null,
         int? OriginalClassId = null);
 
-    private sealed record DetectionClassFilter(
-        GramStainPolarity? Gram,
-        BacteriumShape? Shape)
+    private sealed record DetectionClassFilter(int? ClassId)
     {
         public bool Matches(GramStainDetection detection)
         {
-            if (Gram is null || Shape is null)
-            {
-                return true;
-            }
-
-            if (Gram == GramStainPolarity.Uncertain ||
-                Shape == BacteriumShape.Uncertain)
-            {
-                return detection.Gram == GramStainPolarity.Uncertain ||
-                    detection.Shape == BacteriumShape.Uncertain;
-            }
-
-            return detection.Gram == Gram && detection.Shape == Shape;
+            return ClassId is null || detection.ClassId == ClassId;
         }
     }
 
@@ -2106,7 +2287,7 @@ public sealed class GramStainAnalysisForm : Form
         string DisplayName,
         string ShortName)
     {
-        public static IReadOnlyList<YoloAnnotationClass> All { get; } =
+        public static IReadOnlyList<YoloAnnotationClass> DefaultClasses { get; } =
         [
             new(0, "G-cocci", "G- 球菌", "G-球"),
             new(1, "G+cocci", "G+ 球菌", "G+球"),
@@ -2115,5 +2296,11 @@ public sealed class GramStainAnalysisForm : Form
         ];
 
         public override string ToString() => DisplayName;
+    }
+
+    private static string CreateShortClassName(string className)
+    {
+        string trimmed = className.Trim();
+        return trimmed.Length <= 8 ? trimmed : trimmed[..8];
     }
 }

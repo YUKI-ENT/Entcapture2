@@ -347,14 +347,20 @@ internal sealed record GramStainDetection(
     double Area,
     double AspectRatio,
     double Circularity,
-    Scalar MeanBgr)
+    Scalar MeanBgr,
+    int ClassId = -1,
+    string? ClassName = null)
 {
     public string ShortLabel =>
-        $"{(Gram == GramStainPolarity.Positive ? "G+" : Gram == GramStainPolarity.Negative ? "G-" : "G?")}" +
+        !string.IsNullOrWhiteSpace(ClassName)
+            ? ClassName
+            : $"{(Gram == GramStainPolarity.Positive ? "G+" : Gram == GramStainPolarity.Negative ? "G-" : "G?")}" +
         $"{(Shape == BacteriumShape.Coccus ? "球" : Shape == BacteriumShape.Bacillus ? "桿" : "?")}";
 
     public string DisplayClass =>
-        $"{ToDisplayName(Gram)} {ToDisplayName(Shape)}";
+        !string.IsNullOrWhiteSpace(ClassName)
+            ? ClassName
+            : $"{ToDisplayName(Gram)} {ToDisplayName(Shape)}";
 
     private static string ToDisplayName(GramStainPolarity gram) =>
         gram switch

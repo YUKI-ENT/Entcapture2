@@ -9,8 +9,8 @@ namespace ENTcapture2.WinForms.Analysis;
 internal sealed class YoloBacteriaDetector : IDisposable
 {
     private const int DefaultInputSize = 640;
-    private const int ClassCount = 4;
     private readonly InferenceSession _session;
+    private readonly IReadOnlyList<YoloModelClass> _classes;
     private readonly string _inputName;
     private readonly int _inputWidth;
     private readonly int _inputHeight;
@@ -24,7 +24,10 @@ internal sealed class YoloBacteriaDetector : IDisposable
         int[] dimensions = input.Dimensions;
         _inputHeight = GetDimension(dimensions, 2, DefaultInputSize);
         _inputWidth = GetDimension(dimensions, 3, DefaultInputSize);
+        _classes = LoadModelClasses(modelPath);
     }
+
+    public IReadOnlyList<YoloModelClass> Classes => _classes;
 
     public GramStainAnalysisResult Analyze(
         Mat source,
@@ -127,6 +130,160 @@ internal sealed class YoloBacteriaDetector : IDisposable
         return dimensions[index];
     }
 
+    private static IReadOnlyList<YoloModelClass> LoadModelClasses(string modelPath)
+    {
+        string? yamlPath = FindYamlPath(modelPath);
+        if (yamlPath is not null)
+        {
+            IReadOnlyList<YoloModelClass> classes = ParseYoloNames(File.ReadAllLines(yamlPath));
+            if (classes.Count > 0)
+            {
+                return classes;
+            }
+        }
+
+        return
+        [
+            new(0, "G-cocci"),
+            new(1, "G+cocci"),
+            new(2, "G-bacilli"),
+            new(3, "G+bacilli")
+        ];
+    }
+
+    private static string? FindYamlPath(string modelPath)
+    {
+        string? directory = Path.GetDirectoryName(modelPath);
+        string baseName = Path.GetFileNameWithoutExtension(modelPath);
+        if (string.IsNullOrWhiteSpace(directory))
+        {
+            return null;
+        }
+
+        string[] candidates =
+        [
+            Path.Combine(directory, baseName + ".yaml"),
+            Path.Combine(directory, baseName + ".yml"),
+            Path.Combine(directory, "data.yaml"),
+            Path.Combine(directory, "data.yml")
+        ];
+        return candidates.FirstOrDefault(File.Exists);
+    }
+
+    private static IReadOnlyList<YoloModelClass> ParseYoloNames(IEnumerable<string> lines)
+    {
+        var classes = new SortedDictionary<int, string>();
+        bool inNames = false;
+        foreach (string rawLine in lines)
+        {
+            string line = StripYamlComment(rawLine);
+            if (string.IsNullOrWhiteSpace(line))
+            {
+                continue;
+            }
+
+            string trimmed = line.Trim();
+            if (!inNames)
+            {
+                if (trimmed == "names:")
+                {
+                    inNames = true;
+                    continue;
+                }
+
+                if (trimmed.StartsWith("names:", StringComparison.Ordinal))
+                {
+                    ParseInlineNames(trimmed["names:".Length..].Trim(), classes);
+                    break;
+                }
+
+                continue;
+            }
+
+            if (!char.IsWhiteSpace(rawLine[0]))
+            {
+                break;
+            }
+
+            int separator = trimmed.IndexOf(':');
+            if (separator > 0 &&
+                int.TryParse(trimmed[..separator].Trim(), out int id))
+            {
+                classes[id] = UnquoteYamlValue(trimmed[(separator + 1)..].Trim());
+                continue;
+            }
+
+            if (trimmed.StartsWith("-", StringComparison.Ordinal))
+            {
+                classes[classes.Count] = UnquoteYamlValue(trimmed[1..].Trim());
+            }
+        }
+
+        return classes
+            .Where(item => !string.IsNullOrWhiteSpace(item.Value))
+            .Select(item => new YoloModelClass(item.Key, item.Value))
+            .ToList();
+    }
+
+    private static void ParseInlineNames(
+        string value,
+        IDictionary<int, string> classes)
+    {
+        if (!value.StartsWith("[", StringComparison.Ordinal) ||
+            !value.EndsWith("]", StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        string inner = value[1..^1];
+        foreach (string item in inner.Split(','))
+        {
+            classes[classes.Count] = UnquoteYamlValue(item.Trim());
+        }
+    }
+
+    private static string StripYamlComment(string line)
+    {
+        int index = line.IndexOf('#');
+        return index >= 0 ? line[..index] : line;
+    }
+
+    private static string UnquoteYamlValue(string value)
+    {
+        string trimmed = value.Trim();
+        if (trimmed.Length >= 2 &&
+            ((trimmed[0] == '"' && trimmed[^1] == '"') ||
+             (trimmed[0] == '\'' && trimmed[^1] == '\'')))
+        {
+            return trimmed[1..^1];
+        }
+
+        return trimmed;
+    }
+
+    private static (GramStainPolarity Gram, BacteriumShape Shape) InferBacteriaClass(string className)
+    {
+        string normalized = className
+            .Replace(" ", "", StringComparison.Ordinal)
+            .Replace("_", "", StringComparison.Ordinal)
+            .ToLowerInvariant();
+        GramStainPolarity gram = normalized.Contains("g+", StringComparison.Ordinal) ||
+            normalized.Contains("positive", StringComparison.Ordinal)
+            ? GramStainPolarity.Positive
+            : normalized.Contains("g-", StringComparison.Ordinal) ||
+              normalized.Contains("negative", StringComparison.Ordinal)
+            ? GramStainPolarity.Negative
+            : GramStainPolarity.Uncertain;
+        BacteriumShape shape = normalized.Contains("cocci", StringComparison.Ordinal) ||
+            normalized.Contains("coccus", StringComparison.Ordinal)
+            ? BacteriumShape.Coccus
+            : normalized.Contains("bacilli", StringComparison.Ordinal) ||
+              normalized.Contains("bacillus", StringComparison.Ordinal)
+            ? BacteriumShape.Bacillus
+            : BacteriumShape.Uncertain;
+        return (gram, shape);
+    }
+
     private static Mat EnsureBgr(Mat source)
     {
         if (source.Channels() == 3)
@@ -207,7 +364,7 @@ internal sealed class YoloBacteriaDetector : IDisposable
         return tensor;
     }
 
-    private static List<YoloCandidate> ParseOutput(
+    private List<YoloCandidate> ParseOutput(
         Tensor<float> output,
         LetterboxImage letterbox,
         CvSize originalSize,
@@ -239,7 +396,11 @@ internal sealed class YoloBacteriaDetector : IDisposable
 
                 int classIndex = (int)Math.Round(
                     GetValue(output, channelFirst, 5, row));
-                if (!TryMapClass(classIndex, out GramStainPolarity gram, out BacteriumShape shape))
+                if (!TryMapClass(
+                    classIndex,
+                    out GramStainPolarity gram,
+                    out BacteriumShape shape,
+                    out string className))
                 {
                     continue;
                 }
@@ -252,22 +413,22 @@ internal sealed class YoloBacteriaDetector : IDisposable
                     coordinatesAreCorners: true,
                     letterbox,
                     originalSize);
-                candidates.Add(new YoloCandidate(bounds, gram, shape, score));
+                candidates.Add(new YoloCandidate(bounds, classIndex, className, gram, shape, score));
                 continue;
             }
 
-            if (attributes < 4 + ClassCount)
+            if (attributes < 4 + _classes.Count)
             {
                 continue;
             }
 
-            float objectness = attributes > 4 + ClassCount
+            float objectness = attributes > 4 + _classes.Count
                 ? GetValue(output, channelFirst, 4, row)
                 : 1F;
-            int classOffset = attributes > 4 + ClassCount ? 5 : 4;
+            int classOffset = attributes > 4 + _classes.Count ? 5 : 4;
             float bestScore = 0;
             int bestClass = -1;
-            for (int classIndex = 0; classIndex < ClassCount; classIndex++)
+            for (int classIndex = 0; classIndex < _classes.Count; classIndex++)
             {
                 float classScore =
                     objectness * GetValue(output, channelFirst, classOffset + classIndex, row);
@@ -279,7 +440,11 @@ internal sealed class YoloBacteriaDetector : IDisposable
             }
 
             if (bestScore < confidenceThreshold ||
-                !TryMapClass(bestClass, out GramStainPolarity gramValue, out BacteriumShape shapeValue))
+                !TryMapClass(
+                    bestClass,
+                    out GramStainPolarity gramValue,
+                    out BacteriumShape shapeValue,
+                    out string classValue))
             {
                 continue;
             }
@@ -292,7 +457,7 @@ internal sealed class YoloBacteriaDetector : IDisposable
                 coordinatesAreCorners: false,
                 letterbox,
                 originalSize);
-            candidates.Add(new YoloCandidate(box, gramValue, shapeValue, bestScore));
+            candidates.Add(new YoloCandidate(box, bestClass, classValue, gramValue, shapeValue, bestScore));
         }
 
         return candidates;
@@ -309,20 +474,23 @@ internal sealed class YoloBacteriaDetector : IDisposable
             : output[0, row, attribute];
     }
 
-    private static bool TryMapClass(
+    private bool TryMapClass(
         int classIndex,
         out GramStainPolarity gram,
-        out BacteriumShape shape)
+        out BacteriumShape shape,
+        out string className)
     {
-        (gram, shape) = classIndex switch
+        gram = GramStainPolarity.Uncertain;
+        shape = BacteriumShape.Uncertain;
+        className = string.Empty;
+        if (classIndex < 0 || classIndex >= _classes.Count)
         {
-            0 => (GramStainPolarity.Negative, BacteriumShape.Coccus),
-            1 => (GramStainPolarity.Positive, BacteriumShape.Coccus),
-            2 => (GramStainPolarity.Negative, BacteriumShape.Bacillus),
-            3 => (GramStainPolarity.Positive, BacteriumShape.Bacillus),
-            _ => (GramStainPolarity.Uncertain, BacteriumShape.Uncertain)
-        };
-        return classIndex is >= 0 and < ClassCount;
+            return false;
+        }
+
+        className = _classes[classIndex].Name;
+        (gram, shape) = InferBacteriaClass(className);
+        return true;
     }
 
     private static Rect ToOriginalRect(
@@ -377,8 +545,7 @@ internal sealed class YoloBacteriaDetector : IDisposable
         foreach (YoloCandidate candidate in candidates.OrderByDescending(item => item.Score))
         {
             bool overlaps = selected.Any(item =>
-                item.Gram == candidate.Gram &&
-                item.Shape == candidate.Shape &&
+                item.ClassId == candidate.ClassId &&
                 CalculateIou(item.Bounds, candidate.Bounds) > iouThreshold);
             if (!overlaps)
             {
@@ -466,7 +633,9 @@ internal sealed class YoloBacteriaDetector : IDisposable
             area,
             aspectRatio,
             0,
-            Scalar.All(0));
+            Scalar.All(0),
+            candidate.ClassId,
+            candidate.ClassName);
     }
 
     private static GramStainCounts CreateCounts(
@@ -493,31 +662,16 @@ internal sealed class YoloBacteriaDetector : IDisposable
     private static IReadOnlyList<string> CreateCandidateSummary(
         IReadOnlyList<GramStainDetection> detections)
     {
-        GramStainCounts counts = CreateCounts(detections);
         var candidates = new List<string>
         {
-            "AI解析: Clinical Bacteria DataSet形式のYOLO ONNXを想定しています。",
-            "クラス順: G-cocci, G+cocci, G-bacilli, G+bacilli。学習時の順序が異なる場合は結果が入れ替わります。"
+            "AI解析: ONNXと同じフォルダのyamlからクラス名を読み込んでいます。"
         };
-        if (counts.GramPositiveCocci > 0)
-        {
-            candidates.Add("G+球菌: Staphylococcus/Streptococcus/Enterococcus などの候補。");
-        }
-
-        if (counts.GramNegativeCocci > 0)
-        {
-            candidates.Add("G-球菌: Neisseria/Moraxella などの候補。");
-        }
-
-        if (counts.GramPositiveBacilli > 0)
-        {
-            candidates.Add("G+桿菌: Corynebacterium/Bacillus/Clostridium などの候補。");
-        }
-
-        if (counts.GramNegativeBacilli > 0)
-        {
-            candidates.Add("G-桿菌: Enterobacterales/Pseudomonas などの候補。");
-        }
+        candidates.AddRange(
+            detections
+                .GroupBy(item => item.DisplayClass)
+                .OrderByDescending(group => group.Count())
+                .Take(12)
+                .Select(group => $"{group.Key}: {group.Count()} 個"));
 
         return candidates;
     }
@@ -556,18 +710,23 @@ internal sealed class YoloBacteriaDetector : IDisposable
 
     private static Scalar GetOverlayColor(GramStainDetection detection)
     {
-        return (detection.Gram, detection.Shape) switch
-        {
-            (GramStainPolarity.Positive, BacteriumShape.Coccus) =>
-                new Scalar(255, 220, 0),
-            (GramStainPolarity.Negative, BacteriumShape.Coccus) =>
-                new Scalar(255, 150, 0),
-            (GramStainPolarity.Positive, BacteriumShape.Bacillus) =>
-                new Scalar(120, 255, 0),
-            (GramStainPolarity.Negative, BacteriumShape.Bacillus) =>
-                new Scalar(255, 255, 0),
-            _ => new Scalar(0, 255, 180)
-        };
+        return ToPaletteColor(detection.ClassId);
+    }
+
+    private static Scalar ToPaletteColor(int classId)
+    {
+        Scalar[] palette =
+        [
+            new(255, 220, 0),
+            new(255, 150, 0),
+            new(120, 255, 0),
+            new(255, 255, 0),
+            new(0, 255, 180),
+            new(255, 80, 200),
+            new(80, 160, 255),
+            new(180, 255, 80)
+        ];
+        return palette[Math.Abs(classId) % palette.Length];
     }
 
     private sealed record LetterboxImage(
@@ -578,7 +737,13 @@ internal sealed class YoloBacteriaDetector : IDisposable
 
     private sealed record YoloCandidate(
         Rect Bounds,
+        int ClassId,
+        string ClassName,
         GramStainPolarity Gram,
         BacteriumShape Shape,
         float Score);
 }
+
+internal sealed record YoloModelClass(
+    int Id,
+    string Name);

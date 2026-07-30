@@ -2331,18 +2331,25 @@ public partial class MainForm : Form
         _ = _metadataStore.UpsertPatientAsync(id, name);
         try
         {
-            BeginInvoke(() =>
-            {
-                ClearPreviewAndThumbnails();
-                _patientIdTextBox.Text = id;
-                _patientNameTextBox.Text = name;
-                _statusLabel.Text = "●  RSBase患者情報を読み込みました";
-                _statusLabel.ForeColor = Theme.AccentBright;
-            });
+            BeginInvoke(() => _ = ApplyRsBasePatientChangeAsync(id, name));
         }
         catch (InvalidOperationException)
         {
         }
+    }
+
+    private async Task ApplyRsBasePatientChangeAsync(string id, string name)
+    {
+        if (_playbackService.IsOpen)
+        {
+            await ClosePlaybackAsync();
+        }
+
+        ClearPreviewAndThumbnails();
+        _patientIdTextBox.Text = id;
+        _patientNameTextBox.Text = name;
+        _statusLabel.Text = "●  RSBase患者情報を読み込みました";
+        _statusLabel.ForeColor = Theme.AccentBright;
     }
 
     private async Task RecordCapturedFileAsync(

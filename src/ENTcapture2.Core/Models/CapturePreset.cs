@@ -46,6 +46,8 @@ public sealed class CapturePreset
 
     public DeviceControlPreset DeviceControls { get; set; } = new();
 
+    public ExternalPreviewSettings ExternalPreview { get; set; } = new();
+
     public CapturePreset Clone()
     {
         return new CapturePreset
@@ -71,7 +73,8 @@ public sealed class CapturePreset
             FlipHorizontal = FlipHorizontal,
             FlipVertical = FlipVertical,
             SimpleNbi = SimpleNbi,
-            DeviceControls = DeviceControls?.Clone() ?? new DeviceControlPreset()
+            DeviceControls = DeviceControls?.Clone() ?? new DeviceControlPreset(),
+            ExternalPreview = ExternalPreview?.Clone() ?? new ExternalPreviewSettings()
         };
     }
 

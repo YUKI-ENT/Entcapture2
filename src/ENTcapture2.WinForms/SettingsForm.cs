@@ -40,6 +40,7 @@ public partial class SettingsForm : Form
     private readonly CheckBox _applyDeviceControlsCheckBox = new();
     private readonly Button _captureDeviceControlsButton = new();
     private readonly Label _deviceControlsSummaryLabel = new();
+    private readonly Button _externalPreviewSettingsButton = new();
     private Bitmap? _sampleCoordinateImage;
 
     public SettingsForm()
@@ -62,6 +63,19 @@ public partial class SettingsForm : Form
         _presetPreviewOnlyCheckBox.CheckedChanged +=
             PresetOptionCheckBox_CheckedChanged;
         ConfigureRuntimePresentation();
+        _externalPreviewSettingsButton.Text = "拡張モニター表示を設定…";
+        _externalPreviewSettingsButton.AutoSize = true;
+        _externalPreviewSettingsButton.Margin = new Padding(12, 4, 0, 4);
+        Theme.ApplyButton(_externalPreviewSettingsButton, false);
+        _externalPreviewSettingsButton.Click += (_, _) =>
+        {
+            if (_editingPreset is not { } preset) return;
+            using var dialog = new ExternalPreviewSettingsForm(preset.ExternalPreview);
+            if (dialog.ShowDialog(this) == DialogResult.OK)
+                preset.ExternalPreview = dialog.Settings;
+        };
+        presetOptionsPanel.Controls.Add(_externalPreviewSettingsButton);
+        presetOptionsPanel.WrapContents = true;
         FormClosed += (_, _) => DisposeSampleCoordinateImage();
         LoadSettings();
     }
@@ -2045,7 +2059,8 @@ public partial class SettingsForm : Form
             FlipHorizontal = source.FlipHorizontal,
             FlipVertical = source.FlipVertical,
             SimpleNbi = source.SimpleNbi,
-            DeviceControls = source.DeviceControls?.Clone() ?? new DeviceControlPreset()
+            DeviceControls = source.DeviceControls?.Clone() ?? new DeviceControlPreset(),
+            ExternalPreview = source.ExternalPreview?.Clone() ?? new ExternalPreviewSettings()
         };
     }
 }

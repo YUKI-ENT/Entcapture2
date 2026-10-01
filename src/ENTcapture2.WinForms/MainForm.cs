@@ -167,6 +167,7 @@ public partial class MainForm : Form
         ApplyRuntimePresentation();
         InitializeRuntimeChoices();
         WireEvents();
+        InitializeExternalPreview();
     }
 
     protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
@@ -2421,7 +2422,9 @@ public partial class MainForm : Form
     {
         EnterPlaybackFilterMode();
         await ApplyPlaybackMetadataAsync(filePaths);
+        _externalPlaybackPresetId = _playbackCapturePreset?.Id;
         await _playbackService.OpenAsync(filePaths);
+        ApplyExternalPreview();
         _playbackFilePaths = filePaths.ToArray();
         ClearClipSelection();
         playbackPanel.Visible = true;
@@ -3016,6 +3019,8 @@ public partial class MainForm : Form
         _playbackSourceImage?.Dispose();
         _playbackSourceImage = null;
         _playbackCapturePreset = null;
+        _externalPlaybackPresetId = null;
+        ApplyExternalPreview();
         _playbackCapturedAt = null;
         ClearPreviewImage();
         _playbackFilePaths = [];
@@ -4446,57 +4451,37 @@ public partial class MainForm : Form
             return;
         }
 
-        if (_previewZoomForm is null || _previewZoomForm.IsDisposed)
-        {
-            _previewZoomForm = new PreviewZoomForm();
-            _previewZoomForm.Icon = Icon;
-            _previewZoomForm.TopMost = ShouldUsePreviewTopMost();
-            _previewZoomForm.PlaybackSeekRequested +=
-                PreviewZoomForm_PlaybackSeekRequested;
-            _previewZoomForm.PlaybackToggleRequested +=
-                PreviewZoomForm_PlaybackToggleRequested;
-            _previewZoomForm.PlaybackStepRequested +=
-                PreviewZoomForm_PlaybackStepRequested;
-            _previewZoomForm.FormClosed += async (_, _) =>
-            {
-                if (_previewZoomForm is not null)
-                {
-                    SaveZoomWindowBounds(_previewZoomForm);
-                    if (!_isClosing)
-                    {
-                        await _settingsStore.SaveAsync(_settings);
-                    }
-                }
-
-                _previewZoomForm = null;
-            };
-        }
+        bool wasExternal = _previewZoomForm is { IsExternalDisplay: true };
+        _externalPreviewToggle.Checked = false;
+        PreviewZoomForm form = EnsurePreviewZoomForm();
+        form.ConfigureNormalDisplay();
 
         using Bitmap clone = (Bitmap)_displayedImage.Clone();
         double initialZoom = CalculateInitialZoom(clone.Size);
-        _previewZoomForm.SetImage(clone, initialZoom);
+        form.SetImage(clone, initialZoom);
+        if (wasExternal) PlaceZoomWindowNearMainForm(form);
         if (_lastPlaybackPosition is not null)
         {
-            _previewZoomForm.SetPlaybackPosition(
+            form.SetPlaybackPosition(
                 _lastPlaybackPosition.CurrentTime,
                 _lastPlaybackPosition.TotalTime);
             UpdatePlaybackControlCaptions();
         }
         else
         {
-            _previewZoomForm.SetPlaybackPosition(
+            form.SetPlaybackPosition(
                 TimeSpan.Zero,
                 TimeSpan.Zero);
-            _previewZoomForm.SetPlaybackState(false, true);
+            form.SetPlaybackState(false, true);
         }
 
-        if (!_previewZoomForm.Visible)
+        if (!form.Visible)
         {
-            PlaceZoomWindowNearMainForm(_previewZoomForm);
-            _previewZoomForm.Show(this);
+            PlaceZoomWindowNearMainForm(form);
+            form.Show(this);
         }
 
-        _previewZoomForm.Activate();
+        form.Activate();
     }
 
     private void PreviewZoomForm_PlaybackSeekRequested(TimeSpan time)
@@ -5058,6 +5043,7 @@ public partial class MainForm : Form
                 appliedState.SimpleNbi);
             ApplyDeviceControlsForPreset(preset, device);
             System.Diagnostics.Debug.WriteLine($"[DEBUG] ApplyPreset id={preset.Id} deviceId='{preset.DeviceId}' flipH={preset.FlipHorizontal} flipV={preset.FlipVertical} simpleNbi={preset.SimpleNbi}");
+            ApplyExternalPreview();
         }
         finally
         {
@@ -5498,6 +5484,7 @@ public partial class MainForm : Form
 
     private void SaveZoomWindowBounds(Form zoomForm)
     {
+        if (zoomForm is PreviewZoomForm { IsExternalDisplay: true }) return;
         Rectangle bounds =
             zoomForm.WindowState == FormWindowState.Normal
                 ? zoomForm.Bounds

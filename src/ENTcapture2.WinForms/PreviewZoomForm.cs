@@ -7,7 +7,7 @@ using CvSize = OpenCvSharp.Size;
 
 namespace ENTcapture2.WinForms;
 
-public sealed class PreviewZoomForm : Form
+public sealed partial class PreviewZoomForm : Form
 {
     private readonly Panel _scrollPanel = new();
     private readonly PictureBox _pictureBox = new();
@@ -156,6 +156,12 @@ public sealed class PreviewZoomForm : Form
 
     public void SetImage(Bitmap source)
     {
+        if (IsExternalDisplay)
+        {
+            ReplaceSourceImage(source);
+            _externalSurface?.Invalidate();
+            return;
+        }
         Point? scrollPosition = _isManualZoom
             ? GetScrollPosition()
             : null;
@@ -200,6 +206,7 @@ public sealed class PreviewZoomForm : Form
         ClearDisplayImage();
         _sourceImage?.Dispose();
         _sourceImage = null;
+        _externalSurface?.Invalidate();
         _zoomLabel.Text = "No image";
         SetPlaybackPosition(TimeSpan.Zero, TimeSpan.Zero);
         SetPlaybackState(false, true);
@@ -253,6 +260,11 @@ public sealed class PreviewZoomForm : Form
 
     protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
     {
+        if (IsExternalDisplay)
+        {
+            if (keyData == Keys.Escape) Close();
+            return true;
+        }
         if ((keyData & (Keys.Control | Keys.Alt)) == Keys.None)
         {
             Keys keyCode = keyData & Keys.KeyCode;
@@ -297,6 +309,7 @@ public sealed class PreviewZoomForm : Form
 
     private void PreviewZoomForm_MouseWheel(object? sender, MouseEventArgs e)
     {
+        if (IsExternalDisplay) return;
         double step = e.Delta < 0 ? 0.1 : -0.1;
         ResizeWindowForZoom(_zoom + step);
         if (e is HandledMouseEventArgs handled)
@@ -370,6 +383,11 @@ public sealed class PreviewZoomForm : Form
 
     private void ApplyZoom(bool resizeWindow)
     {
+        if (IsExternalDisplay)
+        {
+            _externalSurface?.Invalidate();
+            return;
+        }
         if (_sourceImage is null)
         {
             _zoomLabel.Text = "100%";
@@ -396,6 +414,11 @@ public sealed class PreviewZoomForm : Form
 
     private void FitImageToWindow()
     {
+        if (IsExternalDisplay)
+        {
+            _externalSurface?.Invalidate();
+            return;
+        }
         if (_sourceImage is null ||
             _scrollPanel.ClientSize.Width <= 0 ||
             _scrollPanel.ClientSize.Height <= 0)

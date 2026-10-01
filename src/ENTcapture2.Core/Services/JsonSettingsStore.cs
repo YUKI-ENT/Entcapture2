@@ -215,6 +215,19 @@ public sealed class JsonSettingsStore : ISettingsStore
             preset.OverlayText ??= string.Empty;
             preset.FontName ??= string.Empty;
             preset.DeviceControls ??= new DeviceControlPreset();
+            preset.ExternalPreview ??= new ExternalPreviewSettings();
+            ExternalPreviewSettings display = preset.ExternalPreview;
+            display.MonitorDeviceName ??= string.Empty;
+            display.Left = Math.Clamp(display.Left, 0, 16384);
+            display.Top = Math.Clamp(display.Top, 0, 16384);
+            display.Width = Math.Clamp(display.Width, 1, 16384);
+            display.Height = Math.Clamp(display.Height, 1, 16384);
+            display.Magnification = double.IsFinite(display.Magnification)
+                ? Math.Clamp(display.Magnification, 0.1, 4.0) : 1.0;
+            if (!Enum.IsDefined(display.Mode)) display.Mode = ExternalPreviewMode.Zoom;
+            if (!Enum.IsDefined(display.Alignment)) display.Alignment = ExternalPreviewAlignment.Left;
+            display.OffsetX = Math.Clamp(display.OffsetX, -16384, 16384);
+            display.OffsetY = Math.Clamp(display.OffsetY, -16384, 16384);
             preset.DeviceControls.VideoProcAmp ??= [];
             preset.DeviceControls.CameraControl ??= [];
             preset.DeviceControls.VideoProcAmp.RemoveAll(

@@ -141,7 +141,10 @@ public sealed partial class PreviewZoomForm : Form
 
             PositionZoomLabel();
         };
-        Shown += (_, _) => _pictureBox.Focus();
+        Shown += (_, _) =>
+        {
+            if (!IsExternalDisplay) _pictureBox.Focus();
+        };
     }
 
     protected override void OnShown(EventArgs e)

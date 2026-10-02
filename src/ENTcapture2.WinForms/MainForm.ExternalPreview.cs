@@ -118,11 +118,15 @@ public partial class MainForm
             if (_displayedImage is { } image) form.SetImage(image);
             else form.ClearImage();
         }
-        form.TopMost = ShouldUsePreviewTopMost();
-        if (!form.Visible) form.Show(this);
-        // Show can apply DPI scaling; enforce the specified screen-pixel bounds.
-        form.ConfigureExternalDisplay(settings,
-            ExternalPreviewLayout.GetWindowBounds(screen.Bounds, settings));
+        bool topMost = ShouldUsePreviewTopMost();
+        if (form.TopMost != topMost) form.TopMost = topMost;
+        if (!form.Visible)
+        {
+            form.Show(this);
+            // Show can apply DPI scaling; enforce the specified screen-pixel bounds.
+            form.ConfigureExternalDisplay(settings,
+                ExternalPreviewLayout.GetWindowBounds(screen.Bounds, settings));
+        }
     }
 
 }

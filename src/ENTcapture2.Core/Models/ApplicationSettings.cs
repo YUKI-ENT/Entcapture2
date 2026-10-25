@@ -23,6 +23,8 @@ public sealed class ApplicationSettings
 
     public bool TopMostDuringPreview { get; set; }
 
+    public bool ExternalPreviewEnabled { get; set; }
+
     public string TemporaryRecordingDirectory { get; set; } = Path.Combine(
         Path.GetTempPath(),
         "ENTcapture2");

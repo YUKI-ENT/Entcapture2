@@ -20,16 +20,27 @@ public partial class MainForm
         _externalPreviewToggle.Margin = ScaleDpi(new Padding(24, 1, 0, 0));
         _externalPreviewToggle.FlatStyle = FlatStyle.Flat;
         _externalPreviewToggle.FlatAppearance.BorderSize = 0;
+        _externalPreviewToggle.FlatAppearance.CheckedBackColor = Color.FromArgb(160, 32, 48);
+        _externalPreviewToggle.UseVisualStyleBackColor = false;
         _externalPreviewToggle.BackColor = Theme.SurfaceRaised;
         _externalPreviewToggle.ForeColor = Theme.Text;
+        _externalPreviewToggle.FlatAppearance.MouseOverBackColor = Theme.ButtonHover;
+        _externalPreviewToggle.FlatAppearance.MouseDownBackColor = Theme.ButtonHover;
         _externalPreviewToggle.Cursor = Cursors.Hand;
         _sourceHeaderPanel.Controls.Add(_externalPreviewToggle);
         _externalPreviewToggle.CheckedChanged += (_, _) =>
         {
             _externalPreviewToggle.Text = _externalPreviewToggle.Checked
                 ? "拡張モニター表示 ON" : "拡張モニター表示 OFF";
+            _settings.ExternalPreviewEnabled = _externalPreviewToggle.Checked;
             _externalPreviewToggle.BackColor = _externalPreviewToggle.Checked
-                ? Theme.Accent : Theme.SurfaceRaised;
+                ? _externalPreviewToggle.FlatAppearance.CheckedBackColor : Theme.SurfaceRaised;
+            _externalPreviewToggle.ForeColor = _externalPreviewToggle.Checked
+                ? Color.White : Theme.Text;
+            Color hoverColor = _externalPreviewToggle.Checked
+                ? _externalPreviewToggle.FlatAppearance.CheckedBackColor : Theme.ButtonHover;
+            _externalPreviewToggle.FlatAppearance.MouseOverBackColor = hoverColor;
+            _externalPreviewToggle.FlatAppearance.MouseDownBackColor = hoverColor;
             if (_externalPreviewToggle.Checked)
             {
                 if (_previewZoomForm is { IsDisposed: false, IsExternalDisplay: false })
@@ -64,7 +75,7 @@ public partial class MainForm
         {
             SaveZoomWindowBounds(form);
             if (ReferenceEquals(_previewZoomForm, form)) _previewZoomForm = null;
-            if (form.IsExternalDisplay) _externalPreviewToggle.Checked = false;
+            if (form.IsExternalDisplay && !_isClosing) _externalPreviewToggle.Checked = false;
             if (!_isClosing)
             {
                 try

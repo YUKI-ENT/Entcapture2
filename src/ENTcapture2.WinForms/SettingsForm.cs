@@ -1996,6 +1996,7 @@ public partial class SettingsForm : Form
                 source.SnapshotBestFrameWindowMilliseconds,
             CaptureMode = CaptureOperationMode.ContinuousTemporaryRecording,
             TopMostDuringPreview = source.TopMostDuringPreview,
+            ExternalPreviewEnabled = source.ExternalPreviewEnabled,
             TemporaryRecordingDirectory = source.TemporaryRecordingDirectory,
             TemporaryRecordingCodec = source.TemporaryRecordingCodec,
             H264EncoderPreference = source.H264EncoderPreference,

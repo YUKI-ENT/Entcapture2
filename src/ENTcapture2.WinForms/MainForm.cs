@@ -1215,6 +1215,7 @@ public partial class MainForm : Form
                 SelectPreset(selectedPreset);
             }
 
+            _externalPreviewToggle.Checked = _settings.ExternalPreviewEnabled;
             UpdateInteractionGuards();
         }
         catch (Exception exception)

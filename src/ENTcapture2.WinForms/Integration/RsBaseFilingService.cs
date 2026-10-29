@@ -70,7 +70,7 @@ internal sealed class RsBaseFilingService
                     progress?.Report(
                         $"動画をコピー中 {index + 1}/{sourceFiles.Count}: " +
                         Path.GetFileName(destinationFile));
-                    File.Copy(sourceFile, destinationFile);
+                    await Task.Run(() => File.Copy(sourceFile, destinationFile), cancellationToken);
                     destinationFiles.Add(destinationFile);
                 }
             }
@@ -158,12 +158,15 @@ internal sealed class RsBaseFilingService
             process.StartInfo.ArgumentList,
             "-hide_banner",
             "-y",
+            "-threads", Math.Clamp(Environment.ProcessorCount / 2, 1, 4).ToString(),
+            "-filter_threads", "2",
             "-i",
             sourceFile,
             "-map",
             "0",
             "-c:v",
-            encoder);
+            encoder,
+            "-threads", Math.Clamp(Environment.ProcessorCount / 2, 1, 4).ToString());
         AddFinalVideoQualityArguments(
             process.StartInfo.ArgumentList,
             encoder,
@@ -176,6 +179,8 @@ internal sealed class RsBaseFilingService
             "128k",
             "-movflags",
             "+faststart",
+            "-fps_mode", "vfr",
+            "-enc_time_base", "1:1000",
             destinationFile);
         await RunAsync(process, cancellationToken);
     }
@@ -287,6 +292,9 @@ internal sealed class RsBaseFilingService
         CancellationToken cancellationToken)
     {
         process.Start();
+        try { process.PriorityClass = ProcessPriorityClass.BelowNormal; }
+        catch (InvalidOperationException) { }
+        catch (System.ComponentModel.Win32Exception) { }
         string error = await process.StandardError.ReadToEndAsync(cancellationToken);
         await process.WaitForExitAsync(cancellationToken);
         if (process.ExitCode != 0)

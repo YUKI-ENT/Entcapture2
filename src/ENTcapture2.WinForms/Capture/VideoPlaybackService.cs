@@ -17,6 +17,7 @@ public sealed class VideoPlaybackService : IAsyncDisposable
     private long _segmentStartFrame;
     private bool _isPaused;
     private long? _pendingSeekFrame;
+    private TimeSpan? _pendingSeekTime;
 
     public event Action<Bitmap, PlaybackPosition>? FrameReady;
 
@@ -71,6 +72,7 @@ public sealed class VideoPlaybackService : IAsyncDisposable
         {
             _isPaused = false;
             _pendingSeekFrame = null;
+            _pendingSeekTime = null;
         }
 
         _cancellation = new CancellationTokenSource();
@@ -97,7 +99,12 @@ public sealed class VideoPlaybackService : IAsyncDisposable
 
     public void Seek(TimeSpan time)
     {
-        SeekFrame(FindFrameForTime(time));
+        lock (_stateLock)
+        {
+            _pendingSeekTime = time < TimeSpan.Zero ? TimeSpan.Zero : time;
+            _pendingSeekFrame = null;
+            _isPaused = true;
+        }
     }
 
     public void SeekFrame(long frame)
@@ -105,6 +112,7 @@ public sealed class VideoPlaybackService : IAsyncDisposable
         lock (_stateLock)
         {
             _pendingSeekFrame = Math.Max(0, frame);
+            _pendingSeekTime = null;
             _isPaused = true;
         }
     }
@@ -117,15 +125,9 @@ public sealed class VideoPlaybackService : IAsyncDisposable
 
         try
         {
-            _capture?.Release();
-            Task playbackTask = _playbackTask ?? Task.CompletedTask;
-            Task completed = await Task.WhenAny(
-                playbackTask,
-                Task.Delay(TimeSpan.FromSeconds(2)));
-            if (completed == playbackTask)
-            {
-                await playbackTask;
-            }
+            // Read/Set/Release on VideoCapture must not run concurrently.
+            // Wait asynchronously for the decoder before releasing native memory.
+            await (_playbackTask ?? Task.CompletedTask);
         }
         catch (OperationCanceledException)
         {
@@ -143,6 +145,7 @@ public sealed class VideoPlaybackService : IAsyncDisposable
             _fileIndex = 0;
             _segmentStartFrame = 0;
             _pendingSeekFrame = null;
+            _pendingSeekTime = null;
         }
     }
 
@@ -174,16 +177,36 @@ public sealed class VideoPlaybackService : IAsyncDisposable
 
         while (!cancellationToken.IsCancellationRequested)
         {
+            TimeSpan? localSeekTime = null;
             bool paused;
             long? seekFrame;
+            TimeSpan? seekTime;
             lock (_stateLock)
             {
                 paused = _isPaused;
                 seekFrame = _pendingSeekFrame;
                 _pendingSeekFrame = null;
+                seekTime = _pendingSeekTime;
+                _pendingSeekTime = null;
             }
 
-            if (seekFrame.HasValue)
+            if (seekTime.HasValue)
+            {
+                TimeSpan localTime = seekTime.Value;
+                int segment = 0;
+                while (segment + 1 < _segmentDurations.Count && localTime >= _segmentDurations[segment])
+                {
+                    localTime -= _segmentDurations[segment++];
+                }
+                if (segment != _fileIndex) OpenSegment(segment);
+                // VFR frames are not uniformly spaced. Seek by time, not average fps.
+                localSeekTime = localTime;
+                paused = true;
+                baseTimestampMilliseconds = -1;
+                playbackFrameOrdinal = 0;
+                playbackClock.Reset();
+            }
+            else if (seekFrame.HasValue)
             {
                 long targetFrame = Math.Clamp(
                     seekFrame.Value,
@@ -221,8 +244,12 @@ public sealed class VideoPlaybackService : IAsyncDisposable
                 continue;
             }
 
-            var frame = new Mat();
-            if (!_capture.Read(frame) || frame.Empty())
+            using var frame = new Mat();
+            double soughtTimestamp = -1;
+            bool read = localSeekTime is { } targetTime
+                ? ReadFrameAtTime(frame, targetTime, cancellationToken, out soughtTimestamp)
+                : _capture.Read(frame);
+            if (!read || frame.Empty())
             {
                 frame.Dispose();
                 if (_fileIndex + 1 < _files.Count)
@@ -244,15 +271,15 @@ public sealed class VideoPlaybackService : IAsyncDisposable
             using (frame)
             {
                 double timestampMilliseconds =
-                    _capture.Get(VideoCaptureProperties.PosMsec);
+                    soughtTimestamp >= 0 ? soughtTimestamp : _capture.Get(VideoCaptureProperties.PosMsec);
                 if (!playbackClock.IsRunning)
                 {
                     playbackClock.Restart();
                 }
 
                 TimeSpan targetElapsed;
-                if (timestampMilliseconds > 0 &&
-                    !double.IsNaN(timestampMilliseconds))
+                if (timestampMilliseconds >= 0 &&
+                    double.IsFinite(timestampMilliseconds))
                 {
                     if (baseTimestampMilliseconds < 0)
                     {
@@ -293,7 +320,10 @@ public sealed class VideoPlaybackService : IAsyncDisposable
                     _segmentStartFrame +
                     (long)_capture.Get(VideoCaptureProperties.PosFrames) - 1);
                 currentFrame = Math.Clamp(currentFrame, 0, frameCount - 1);
-                TimeSpan currentTime = GetTimeForFrame(
+                TimeSpan currentTime = double.IsFinite(timestampMilliseconds) && timestampMilliseconds >= 0
+                    ? TimeSpan.FromTicks(_segmentDurations.Take(_fileIndex).Sum(duration => duration.Ticks)) +
+                        TimeSpan.FromMilliseconds(timestampMilliseconds)
+                    : GetTimeForFrame(
                     currentFrame,
                     frameCount,
                     totalDuration,
@@ -309,6 +339,42 @@ public sealed class VideoPlaybackService : IAsyncDisposable
                         totalDuration));
             }
         }
+    }
+
+    private bool ReadFrameAtTime(Mat frame, TimeSpan time, CancellationToken cancellationToken, out double timestamp)
+    {
+        // OpenCV's FFmpeg backend converts time seeks using average fps, which
+        // can overshoot on VFR. Back off until before the target, then decode
+        // forward using actual PTS. No timestamp-to-frame-count approximation.
+        Debug.Assert(_capture is not null);
+        timestamp = -1;
+        double target = Math.Max(0, time.TotalMilliseconds);
+        double seek = target;
+        for (int attempt = 0; ; attempt++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (attempt >= 3 || seek <= 0) _capture.Set(VideoCaptureProperties.PosFrames, 0);
+            else _capture.Set(VideoCaptureProperties.PosMsec, seek);
+            if (!_capture.Read(frame) || frame.Empty())
+            {
+                if (attempt >= 3 || seek <= 0) return false;
+                seek = Math.Max(0, seek - 1000);
+                continue;
+            }
+            double actual = _capture.Get(VideoCaptureProperties.PosMsec);
+            timestamp = actual;
+            if (actual <= target + 1 || attempt >= 3 || seek <= 0) break;
+            seek = Math.Max(0, seek - Math.Max(1000, (actual - target) * 2));
+        }
+        using var next = new Mat();
+        while (timestamp < target - 1)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!_capture.Read(next) || next.Empty()) break;
+            next.CopyTo(frame);
+            timestamp = _capture.Get(VideoCaptureProperties.PosMsec);
+        }
+        return true;
     }
 
     private void OpenSegment(int index)

@@ -87,6 +87,7 @@ public partial class MainForm : Form
     private bool _isApplyingPreset;
     private bool _isClosing;
     private int _frameRenderPending;
+    private int _playbackRenderPending;
     private bool _isSeekingPlayback;
     private bool _isCaptureTransitioning;
     private int _isHandlingCaptureFault;
@@ -2395,7 +2396,7 @@ public partial class MainForm : Form
 
         DateTime threshold = DateTime.Now.AddDays(
             -_settings.TemporaryFileRetentionDays);
-        foreach (string extension in new[] { "*.avi", "*.mp4" })
+        foreach (string extension in new[] { "*.avi", "*.mp4", "*.mkv" })
         {
             foreach (string file in Directory.EnumerateFiles(
                          _settings.TemporaryRecordingDirectory,
@@ -3446,48 +3447,70 @@ public partial class MainForm : Form
             return;
         }
 
+        // Bound UI work and bitmap memory when decoding outruns painting.
+        if (Interlocked.Exchange(ref _playbackRenderPending, 1) == 1)
+        {
+            bitmap.Dispose();
+            return;
+        }
         Bitmap rawBitmap = bitmap;
-        Bitmap displayBitmap =
-            ApplyDisplayFilter((Bitmap)rawBitmap.Clone(), _playbackFilterState);
+        Bitmap? displayBitmap = null;
 
         try
         {
+            displayBitmap = ApplyDisplayFilter((Bitmap)rawBitmap.Clone(), _playbackFilterState);
             BeginInvoke(() =>
             {
-                _lastPlaybackPosition = position;
-                Bitmap? previousSource = _playbackSourceImage;
-                Bitmap? previous = _displayedImage;
-                _playbackSourceImage = rawBitmap;
-                _displayedImage = displayBitmap;
-                _previewBox.Image = displayBitmap;
-                UpdatePreviewZoomForm(displayBitmap);
-                previousSource?.Dispose();
-                previous?.Dispose();
-
-                if (!_isSeekingPlayback)
+                try
                 {
-                    _playbackTrackBar.Tag = position.TotalTime;
-                    _playbackTrackBar.Value = Math.Clamp(
-                        (int)Math.Round(
-                            position.CurrentTime.Ticks /
-                            (double)Math.Max(1, position.TotalTime.Ticks) *
-                            _playbackTrackBar.Maximum),
-                        _playbackTrackBar.Minimum,
-                        _playbackTrackBar.Maximum);
-                }
+                    if (_isClosing || IsDisposed || !_playbackService.IsOpen)
+                    {
+                        rawBitmap.Dispose();
+                        displayBitmap.Dispose();
+                        return;
+                    }
+                    _lastPlaybackPosition = position;
+                    Bitmap? previousSource = _playbackSourceImage;
+                    Bitmap? previous = _displayedImage;
+                    _playbackSourceImage = rawBitmap;
+                    _displayedImage = displayBitmap;
+                    _previewBox.Image = displayBitmap;
+                    _previewBox.Update();
+                    UpdatePreviewZoomForm(displayBitmap);
+                    previousSource?.Dispose();
+                    previous?.Dispose();
 
-                _playbackPositionLabel.Text =
-                    $"{FormatElapsed(position.CurrentTime)} / " +
-                    $"{FormatElapsed(position.TotalTime)}";
-                _fpsLabel.Text =
-                    $"PLAYBACK {position.PlaybackFramesPerSecond:0.0} fps";
-                UpdatePlaybackControlCaptions();
+                    if (!_isSeekingPlayback)
+                    {
+                        _playbackTrackBar.Tag = position.TotalTime;
+                        _playbackTrackBar.Value = Math.Clamp(
+                            (int)Math.Round(
+                                position.CurrentTime.Ticks /
+                                (double)Math.Max(1, position.TotalTime.Ticks) *
+                                _playbackTrackBar.Maximum),
+                            _playbackTrackBar.Minimum,
+                            _playbackTrackBar.Maximum);
+                    }
+
+                    _playbackPositionLabel.Text =
+                        $"{FormatElapsed(position.CurrentTime)} / " +
+                        $"{FormatElapsed(position.TotalTime)}";
+                    _fpsLabel.Text =
+                        $"PLAYBACK {position.PlaybackFramesPerSecond:0.0} fps";
+                    UpdatePlaybackControlCaptions();
+                }
+                finally
+                {
+                    Interlocked.Exchange(ref _playbackRenderPending, 0);
+                }
             });
         }
-        catch (InvalidOperationException)
+        catch
         {
             rawBitmap.Dispose();
-            displayBitmap.Dispose();
+            displayBitmap?.Dispose();
+            Interlocked.Exchange(ref _playbackRenderPending, 0);
+            if (!_isClosing && !IsDisposed) throw;
         }
     }
 
@@ -3520,6 +3543,9 @@ public partial class MainForm : Form
                     Bitmap? previous = _displayedImage;
                     _displayedImage = bitmap;
                     _previewBox.Image = bitmap;
+                    // Posted frame callbacks can otherwise starve WM_PAINT on the
+                    // main form while the external surface continues painting.
+                    _previewBox.Update();
                     UpdatePreviewZoomForm(bitmap);
                     previous?.Dispose();
                 }

@@ -1,6 +1,5 @@
 using System.Collections.ObjectModel;
 using System.Diagnostics;
-using System.Globalization;
 using System.Runtime.InteropServices;
 using OpenCvSharp;
 using CvSize = OpenCvSharp.Size;
@@ -13,6 +12,9 @@ internal sealed class FfmpegVideoWriter : IDisposable
     private readonly Stream _input;
     private readonly Task<string> _errorTask;
     private readonly byte[] _frameBuffer;
+    private readonly TimestampedRawVideoStream _transport;
+    private long _lastTimestamp = -1;
+    private readonly double _framesPerSecond;
     private bool _disposed;
 
     public FfmpegVideoWriter(
@@ -23,6 +25,8 @@ internal sealed class FfmpegVideoWriter : IDisposable
         int h264Quality)
     {
         Encoder = encoder;
+        _framesPerSecond = double.IsFinite(framesPerSecond) && framesPerSecond > 0
+            ? Math.Clamp(framesPerSecond, 1, 240) : 30;
         _frameBuffer = new byte[checked(
             frameSize.Width * frameSize.Height * 3)];
 
@@ -31,9 +35,7 @@ internal sealed class FfmpegVideoWriter : IDisposable
         AddArguments(
             startInfo.ArgumentList,
             path,
-            frameSize,
             encoder,
-            framesPerSecond,
             h264Quality);
 
         _process = new Process { StartInfo = startInfo };
@@ -42,6 +44,7 @@ internal sealed class FfmpegVideoWriter : IDisposable
             _process.Start();
             _input = _process.StandardInput.BaseStream;
             _errorTask = _process.StandardError.ReadToEndAsync();
+            _transport = new TimestampedRawVideoStream(_input, frameSize.Width, frameSize.Height, _framesPerSecond);
         }
         catch
         {
@@ -52,7 +55,7 @@ internal sealed class FfmpegVideoWriter : IDisposable
 
     public FfmpegEncoderSelection Encoder { get; }
 
-    public void Write(Mat frame)
+    public void Write(Mat frame, TimeSpan capturedAt)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         if (frame.Type() != MatType.CV_8UC3)
@@ -64,6 +67,8 @@ internal sealed class FfmpegVideoWriter : IDisposable
         int frameWidth = frame.Width;
         int frameHeight = frame.Height;
         int rowBytes = checked(frameWidth * 3);
+        if (checked(rowBytes * frameHeight) != _frameBuffer.Length)
+            throw new ArgumentException("録画中にフレームサイズが変わりました。", nameof(frame));
         if (frame.IsContinuous() && frame.Step() == rowBytes)
         {
             Marshal.Copy(frame.Data, _frameBuffer, 0, _frameBuffer.Length);
@@ -82,11 +87,28 @@ internal sealed class FfmpegVideoWriter : IDisposable
 
         try
         {
-            _input.Write(_frameBuffer);
+            long timestamp = Math.Max(_lastTimestamp + 1, (long)Math.Round(capturedAt.TotalMilliseconds));
+            // Cover startup delay with the first available image, so the file
+            // begins at recording start rather than trimming its leading gap.
+            if (_lastTimestamp < 0 && timestamp > 0) _transport.WriteFrame(_frameBuffer, 0);
+            _transport.WriteFrame(_frameBuffer, timestamp);
+            _lastTimestamp = timestamp;
         }
         catch (IOException exception)
         {
             throw CreateWriteFailure(exception);
+        }
+    }
+
+    // Hold the last image through a dropped-frame tail without filling every gap
+    // with duplicate frames. Only an endpoint frame is added if necessary.
+    public void Complete(TimeSpan endedAt)
+    {
+        long endpoint = (long)Math.Round(endedAt.TotalMilliseconds - 1000 / _framesPerSecond);
+        if (_lastTimestamp >= 0 && endpoint > _lastTimestamp)
+        {
+            _transport.WriteFrame(_frameBuffer, endpoint);
+            _lastTimestamp = endpoint;
         }
     }
 
@@ -139,48 +161,37 @@ internal sealed class FfmpegVideoWriter : IDisposable
     private static void AddArguments(
         Collection<string> arguments,
         string path,
-        CvSize frameSize,
         FfmpegEncoderSelection encoder,
-        double framesPerSecond,
         int h264Quality)
     {
-        string frameRate = NormalizeFrameRate(framesPerSecond);
         Add(arguments,
             "-hide_banner",
             "-loglevel", "warning",
             "-y",
-            "-fflags", "+genpts",
-            "-use_wallclock_as_timestamps", "1",
-            "-f", "rawvideo",
-            "-pixel_format", "bgr24",
-            "-video_size", $"{frameSize.Width}x{frameSize.Height}",
-            "-framerate", frameRate,
+            "-copyts",
+            "-f", "matroska",
+            "-analyzeduration", "1",
+            "-probesize", "32",
+            "-fpsprobesize", "0",
             "-i", "pipe:0",
             "-an",
             "-c:v", encoder.EncoderName);
-        FfmpegRuntime.AddEncoderArguments(
+        if (encoder.EncoderName != "rawvideo") FfmpegRuntime.AddEncoderArguments(
             arguments,
             encoder.EncoderName,
             h264Quality: h264Quality);
         string pixelFormat =
-            FfmpegRuntime.GetOutputPixelFormat(encoder.EncoderName);
+            encoder.EncoderName == "rawvideo" ? "bgr24" : FfmpegRuntime.GetOutputPixelFormat(encoder.EncoderName);
         Add(arguments,
             "-pix_fmt", pixelFormat,
+            "-bf", "0",
             "-fps_mode", "vfr",
             "-enc_time_base", "1:1000",
             "-video_track_timescale", "1000",
-            "-avoid_negative_ts", "make_zero",
-            "-movflags", "+faststart",
-            path);
-    }
-
-    private static string NormalizeFrameRate(double framesPerSecond)
-    {
-        double fps = double.IsFinite(framesPerSecond) && framesPerSecond > 0
-            ? framesPerSecond
-            : 30;
-        fps = Math.Clamp(fps, 1, 240);
-        return fps.ToString("0.###", CultureInfo.InvariantCulture);
+            "-avoid_negative_ts", "disabled",
+            "-movflags", "+faststart");
+        if (encoder.EncoderName == "rawvideo") Add(arguments, "-allow_raw_vfw", "1");
+        Add(arguments, path);
     }
 
     private static void Add(

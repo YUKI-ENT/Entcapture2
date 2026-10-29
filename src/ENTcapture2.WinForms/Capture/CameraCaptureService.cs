@@ -8,7 +8,6 @@ namespace ENTcapture2.WinForms.Capture;
 
 public sealed class CameraCaptureService : IAsyncDisposable
 {
-    private const int RecordingQueueCapacity = 600;
     private const int MaximumBestSnapshotWindowMilliseconds = 1000;
     private const int NoInputFrameFaultThresholdSeconds = 30;
 
@@ -23,15 +22,18 @@ public sealed class CameraCaptureService : IAsyncDisposable
     private UsbCamera? _usbCamera;
     private Bitmap? _latestImage;
     private Mat? _latestSourceFrame;
-    private Channel<Bitmap>? _bitmapChannel;
+    private Channel<CapturedFrame<Bitmap>>? _bitmapChannel;
     private Channel<Mat>? _frameChannel;
-    private Channel<Mat>? _recordingChannel;
+    private Channel<CapturedFrame<Mat>>? _recordingChannel;
+    private long _captureStartedTimestamp;
+    private long _captureEndedTimestamp;
     private RecordingOptions? _recordingOptions;
     private ProcessingOptions _options = ProcessingOptions.Default;
     private long _receivedFrames;
     private long _displayedFrames;
     private long _droppedFrames;
     private int _maximumPreviewFramesPerSecond;
+    private long _lastPreviewQueuedTimestamp;
     private volatile bool _retainUnprocessedSnapshot;
 
     public event Action<Bitmap>? FrameReady;
@@ -82,6 +84,7 @@ public sealed class CameraCaptureService : IAsyncDisposable
             _receivedFrames = 0;
             _displayedFrames = 0;
             _droppedFrames = 0;
+            _lastPreviewQueuedTimestamp = 0;
             LastRecordingPath = null;
             _lastRecordingPaths.Clear();
             LastRecordingError = null;
@@ -90,29 +93,11 @@ public sealed class CameraCaptureService : IAsyncDisposable
             _recordingOptions = recordingOptions;
             _maximumPreviewFramesPerSecond =
                 Math.Clamp(maximumPreviewFramesPerSecond, 0, 240);
-            _frameChannel = Channel.CreateBounded<Mat>(
-                new BoundedChannelOptions(1)
-                {
-                    FullMode = BoundedChannelFullMode.Wait,
-                    SingleReader = true,
-                    SingleWriter = true
-                });
-            _bitmapChannel = Channel.CreateBounded<Bitmap>(
-                new BoundedChannelOptions(2)
-                {
-                    FullMode = BoundedChannelFullMode.Wait,
-                    SingleReader = true,
-                    SingleWriter = false
-                });
+            _frameChannel = CreateLatestFrameChannel<Mat>();
+            _bitmapChannel = CreateLatestFrameChannel<CapturedFrame<Bitmap>>();
             if (recordingOptions is not null)
             {
-                _recordingChannel = Channel.CreateBounded<Mat>(
-                    new BoundedChannelOptions(RecordingQueueCapacity)
-                    {
-                        FullMode = BoundedChannelFullMode.Wait,
-                        SingleReader = true,
-                        SingleWriter = true
-                    });
+                _recordingChannel = CreateLatestFrameChannel<CapturedFrame<Mat>>();
             }
 
             _cancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -144,6 +129,8 @@ public sealed class CameraCaptureService : IAsyncDisposable
                 : new UsbCamera(deviceId, format);
             ENTcapture2.Core.Services.DebugLogger.Info($"CameraCaptureService: Device initialized, starting capture");
             _usbCamera.PreviewCaptured = UsbCamera_PreviewCaptured;
+            _captureStartedTimestamp = Stopwatch.GetTimestamp();
+            _captureEndedTimestamp = 0;
             _usbCamera.Start();
 
             _captureTask = Task.Run(() => StatisticsLoopAsync(token), token);
@@ -202,6 +189,7 @@ public sealed class CameraCaptureService : IAsyncDisposable
         _bitmapChannel?.Writer.TryComplete();
         _frameChannel?.Writer.TryComplete();
         _recordingChannel?.Writer.TryComplete();
+        DisposePendingFrames();
         _bitmapChannel = null;
         _frameChannel = null;
         _recordingChannel = null;
@@ -309,6 +297,7 @@ public sealed class CameraCaptureService : IAsyncDisposable
             return;
         }
 
+        _captureEndedTimestamp = Stopwatch.GetTimestamp();
         _cancellation = null;
         cancellation.Cancel();
         try
@@ -374,6 +363,7 @@ public sealed class CameraCaptureService : IAsyncDisposable
             _bitmapIngestTask = null;
             _processingTask = null;
             _recordingTask = null;
+            DisposePendingFrames();
             _bitmapChannel = null;
             _frameChannel = null;
             _recordingChannel = null;
@@ -563,6 +553,7 @@ public sealed class CameraCaptureService : IAsyncDisposable
 
     private void UsbCamera_PreviewCaptured(Bitmap bitmap)
     {
+        long capturedTimestamp = Stopwatch.GetTimestamp();
         try
         {
             if (_cancellation is null ||
@@ -573,7 +564,7 @@ public sealed class CameraCaptureService : IAsyncDisposable
             }
 
             Interlocked.Increment(ref _receivedFrames);
-            if (!_bitmapChannel.Writer.TryWrite(bitmap))
+            if (!_bitmapChannel.Writer.TryWrite(new CapturedFrame<Bitmap>(bitmap, capturedTimestamp)))
             {
                 bitmap.Dispose();
                 Interlocked.Increment(ref _droppedFrames);
@@ -599,12 +590,12 @@ public sealed class CameraCaptureService : IAsyncDisposable
         Debug.Assert(_bitmapChannel is not null);
         try
         {
-            await foreach (Bitmap bitmap in _bitmapChannel.Reader.ReadAllAsync(cancellationToken))
+            await foreach (CapturedFrame<Bitmap> captured in _bitmapChannel.Reader.ReadAllAsync(cancellationToken))
             {
-                using (bitmap)
-                using (Mat frame = BitmapConverter.ToMat(bitmap))
+                using (captured)
+                using (Mat frame = BitmapConverter.ToMat(captured.Image))
                 {
-                    EnqueueCapturedFrame(frame);
+                    EnqueueCapturedFrame(frame, captured.Timestamp);
                 }
             }
         }
@@ -620,7 +611,35 @@ public sealed class CameraCaptureService : IAsyncDisposable
         }
     }
 
-    private void EnqueueCapturedFrame(Mat frame)
+    // A slow consumer retains only the most recent pending frame. The frame
+    // currently being processed is owned by the consumer and is never disposed here.
+    private Channel<T> CreateLatestFrameChannel<T>() where T : IDisposable
+    {
+        return Channel.CreateBounded<T>(new BoundedChannelOptions(1)
+        {
+            FullMode = BoundedChannelFullMode.DropOldest,
+            SingleReader = true,
+            SingleWriter = false
+        }, dropped =>
+        {
+            dropped.Dispose();
+            Interlocked.Increment(ref _droppedFrames);
+        });
+    }
+
+    private sealed record CapturedFrame<T>(T Image, long Timestamp) : IDisposable where T : IDisposable
+    {
+        public void Dispose() => Image.Dispose();
+    }
+
+    private void DisposePendingFrames()
+    {
+        while (_bitmapChannel?.Reader.TryRead(out var bitmap) == true) bitmap.Dispose();
+        while (_frameChannel?.Reader.TryRead(out var preview) == true) preview.Dispose();
+        while (_recordingChannel?.Reader.TryRead(out var recording) == true) recording.Dispose();
+    }
+
+    private void EnqueueCapturedFrame(Mat frame, long capturedTimestamp)
     {
         if (_retainUnprocessedSnapshot)
         {
@@ -635,39 +654,33 @@ public sealed class CameraCaptureService : IAsyncDisposable
             }
         }
 
+        bool recordingBacklogged = _recordingChannel?.Reader.Count > 0;
         if (_recordingChannel is not null)
         {
-            Mat recordingFrame = frame.Clone();
+            var recordingFrame = new CapturedFrame<Mat>(frame.Clone(), capturedTimestamp);
             if (!_recordingChannel.Writer.TryWrite(recordingFrame))
             {
-                if (_recordingChannel.Reader.TryRead(out Mat? staleRecordingFrame))
-                {
-                    staleRecordingFrame.Dispose();
-                    Interlocked.Increment(ref _droppedFrames);
-                }
-
-                if (!_recordingChannel.Writer.TryWrite(recordingFrame))
-                {
-                    recordingFrame.Dispose();
-                    Interlocked.Increment(ref _droppedFrames);
-                }
+                recordingFrame.Dispose();
+                Interlocked.Increment(ref _droppedFrames);
             }
         }
 
+        // Give recording first access. Under overload, limit preview to 10 fps
+        // rather than starving it completely and leaving an old image on screen.
+        long now = Stopwatch.GetTimestamp();
+        if (recordingBacklogged &&
+            Stopwatch.GetElapsedTime(_lastPreviewQueuedTimestamp, now).TotalMilliseconds < 100)
+        {
+            Interlocked.Increment(ref _droppedFrames);
+            return;
+        }
+
+        _lastPreviewQueuedTimestamp = now;
         Mat previewFrame = frame.Clone();
         if (!_frameChannel!.Writer.TryWrite(previewFrame))
         {
-            if (_frameChannel.Reader.TryRead(out Mat? staleFrame))
-            {
-                staleFrame.Dispose();
-                Interlocked.Increment(ref _droppedFrames);
-            }
-
-            if (!_frameChannel.Writer.TryWrite(previewFrame))
-            {
-                previewFrame.Dispose();
-                Interlocked.Increment(ref _droppedFrames);
-            }
+            previewFrame.Dispose();
+            Interlocked.Increment(ref _droppedFrames);
         }
     }
 
@@ -800,150 +813,76 @@ public sealed class CameraCaptureService : IAsyncDisposable
     {
         Debug.Assert(_recordingChannel is not null);
         Debug.Assert(_recordingOptions is not null);
-
-        VideoWriter? writer = null;
-        FfmpegVideoWriter? ffmpegWriter = null;
-        Stopwatch? segmentClock = null;
+        FfmpegVideoWriter? writer = null;
+        long segmentStart = _captureStartedTimestamp;
         int segmentNumber = 1;
         string sessionTimestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss_fff");
         try
         {
-            await foreach (Mat source in _recordingChannel.Reader.ReadAllAsync())
+            await foreach (CapturedFrame<Mat> captured in _recordingChannel.Reader.ReadAllAsync())
             {
-                using (source)
-                using (Mat processed = ApplyProcessing(source))
+                using (captured)
+                using (Mat processed = ApplyProcessing(captured.Image))
                 {
                     RecordingOptions options = _recordingOptions;
-                    bool segmentExpired =
-                        options.SegmentMinutes > 0 &&
-                        segmentClock?.Elapsed >=
-                        TimeSpan.FromMinutes(options.SegmentMinutes);
-                    if ((writer is not null || ffmpegWriter is not null) &&
-                        segmentExpired)
+                    if (writer is not null && options.SegmentMinutes > 0 &&
+                        Stopwatch.GetElapsedTime(segmentStart, captured.Timestamp) >= TimeSpan.FromMinutes(options.SegmentMinutes))
                     {
-                        writer?.Release();
-                        writer?.Dispose();
+                        writer.Complete(Stopwatch.GetElapsedTime(segmentStart, captured.Timestamp));
+                        writer.Dispose();
                         writer = null;
-                        ffmpegWriter?.Dispose();
-                        ffmpegWriter = null;
-                        segmentClock = null;
+                        segmentStart = captured.Timestamp;
                         segmentNumber++;
                     }
-
-                    if (writer is null && ffmpegWriter is null)
+                    if (writer is null)
                     {
                         Directory.CreateDirectory(options.Directory);
                         string codec = NormalizeCodec(options.Codec);
-                        FfmpegEncoderSelection? ffmpegEncoder = null;
-                        if (codec is "H264" or "MJPG")
+                        FfmpegEncoderSelection encoder;
+                        try
                         {
-                            try
+                            encoder = codec switch
                             {
-                                ffmpegEncoder = codec == "H264"
-                                    ? FfmpegRuntime.SelectH264Encoder(
-                                        options.H264EncoderPreference)
-                                    : FfmpegRuntime.SelectMjpegEncoder();
-                                if (ffmpegEncoder.UsedFallback)
-                                {
-                                    LastRecordingWarning =
-                                        ffmpegEncoder.FallbackMessage;
-                                }
-                            }
-                            catch (Exception exception)
-                            {
-                                codec = "MJPG";
-                                LastRecordingWarning =
-                                    "FFmpeg繧貞・譛溷喧縺ｧ縺阪↑縺・◆繧√∝ｾ捺擂縺ｮMJPEG縺ｸ蛻・ｊ譖ｿ縺医∪縺励◆: " +
-                                    exception.Message;
-                            }
+                                "H264" => FfmpegRuntime.SelectH264Encoder(options.H264EncoderPreference),
+                                "RAW" => new FfmpegEncoderSelection("rawvideo", "FFmpeg RAW (VFR)", false, [], false, null),
+                                _ => FfmpegRuntime.SelectMjpegEncoder()
+                            };
                         }
-
-                        string extension =
-                            ffmpegEncoder is not null ? ".mp4" : ".avi";
-                        string path = CreateRecordingPath(
-                            options.Directory,
-                            options.FileNamePrefix,
-                            extension,
-                            segmentNumber,
-                            sessionTimestamp);
-                        if (ffmpegEncoder is not null)
+                        catch (Exception exception) when (codec == "H264")
                         {
-                            ffmpegWriter = new FfmpegVideoWriter(
-                                path,
-                                processed.Size(),
-                                ffmpegEncoder,
-                                options.FramesPerSecond,
-                                options.H264Quality);
-                            LastRecordingEncoder =
-                                ffmpegEncoder.DisplayName;
+                            encoder = FfmpegRuntime.SelectMjpegEncoder();
+                            LastRecordingWarning = "H.264を初期化できないためMJPEGへ切り替えました: " + exception.Message;
                         }
-                        else
-                        {
-                            double fps = options.FramesPerSecond > 0
-                                ? options.FramesPerSecond
-                                : 30;
-                            int fourCc = codec == "RAW"
-                                ? 0
-                                : VideoWriter.FourCC(
-                                    codec[0],
-                                    codec[1],
-                                    codec[2],
-                                    codec[3]);
-                            writer = new VideoWriter(
-                                path,
-                                fourCc,
-                                fps,
-                                processed.Size());
-                        if (!writer.IsOpened())
-                        {
-                            writer.Dispose();
-                            writer = null;
-                            throw new InvalidOperationException(
-                                $"荳谺｡蜍慕判繝輔ぃ繧､繝ｫ繧剃ｽ懈・縺ｧ縺阪∪縺帙ｓ縺ｧ縺励◆: {path}");
-                        }
-
-                            LastRecordingEncoder = codec;
-                        }
-
+                        if (encoder.UsedFallback) LastRecordingWarning = encoder.FallbackMessage;
+                        string path = CreateRecordingPath(options.Directory, options.FileNamePrefix,
+                            codec == "RAW" ? ".mkv" : ".mp4", segmentNumber, sessionTimestamp);
+                        writer = new FfmpegVideoWriter(path, processed.Size(), encoder,
+                            options.FramesPerSecond, options.H264Quality);
+                        LastRecordingEncoder = encoder.DisplayName;
                         LastRecordingPath = path;
                         _lastRecordingPaths.Add(path);
-                        segmentClock = Stopwatch.StartNew();
                     }
-
-                    if (ffmpegWriter is not null)
-                    {
-                        ffmpegWriter.Write(processed);
-                    }
-                    else
-                    {
-                        writer!.Write(processed);
-                    }
+                    writer.Write(processed, Stopwatch.GetElapsedTime(segmentStart, captured.Timestamp));
                 }
+            }
+            if (writer is not null)
+            {
+                long end = _captureEndedTimestamp == 0 ? Stopwatch.GetTimestamp() : _captureEndedTimestamp;
+                writer.Complete(Stopwatch.GetElapsedTime(segmentStart, end));
             }
         }
         catch (Exception exception)
         {
             LastRecordingError = exception;
-            ENTcapture2.Core.Services.DebugLogger.Error(
-                "CameraCaptureService.RecordingLoopAsync: Recording failed",
-                exception);
+            ENTcapture2.Core.Services.DebugLogger.Error("CameraCaptureService.RecordingLoopAsync: Recording failed", exception);
             ReportCaptureFault(exception);
         }
         finally
         {
-            try
-            {
-                writer?.Release();
-                writer?.Dispose();
-                ffmpegWriter?.Dispose();
-            }
-            catch (Exception exception)
-            {
-                LastRecordingError ??= exception;
-            }
+            try { writer?.Dispose(); }
+            catch (Exception exception) { LastRecordingError ??= exception; }
         }
     }
-
     private static string NormalizeCodec(string codec)
     {
         string normalized = codec.Trim().ToUpperInvariant();

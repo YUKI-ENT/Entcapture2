@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <PlatformTarget>x64</PlatformTarget>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/ENTcapture2.WinForms/ENTcapture2.WinForms.csproj" />
+    <Compile Include="../../src/ENTcapture2.WinForms/Capture/FfmpegVideoWriter.cs" Link="FfmpegVideoWriter.cs" />
+    <Compile Include="../../src/ENTcapture2.WinForms/Capture/FfmpegRuntime.cs" Link="FfmpegRuntime.cs" />
+    <Compile Include="../../src/ENTcapture2.WinForms/Capture/TimestampedRawVideoStream.cs" Link="TimestampedRawVideoStream.cs" />
+  </ItemGroup>
+</Project>

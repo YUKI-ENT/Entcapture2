@@ -272,7 +272,9 @@ internal sealed class ClipExportService
             encoder = "libopenh264";
         }
 
-        FfmpegRuntime.Add(arguments, "-an", "-c:v", encoder);
+        FfmpegRuntime.Add(arguments, "-an", "-c:v", encoder,
+            "-fps_mode", "vfr", "-enc_time_base", "1:1000",
+            "-threads", Math.Clamp(Environment.ProcessorCount / 2, 1, 4).ToString());
         if (!string.IsNullOrWhiteSpace(options.DeinterlaceFilter))
         {
             FfmpegRuntime.Add(arguments, "-vf", options.DeinterlaceFilter);
@@ -469,6 +471,9 @@ internal sealed class ClipExportService
         CancellationToken cancellationToken)
     {
         process.Start();
+        try { process.PriorityClass = ProcessPriorityClass.BelowNormal; }
+        catch (InvalidOperationException) { }
+        catch (System.ComponentModel.Win32Exception) { }
         Task<string> errorTask = process.StandardError.ReadToEndAsync(cancellationToken);
         using CancellationTokenSource timeout = CancellationTokenSource
             .CreateLinkedTokenSource(cancellationToken);

@@ -768,6 +768,7 @@ internal sealed class ClipEditorForm : Form
         var progress = new Progress<string>(
             message =>
             {
+                if (IsDisposed || Disposing || _commandPreviewTextBox.IsDisposed) return;
                 _commandPreviewTextBox.AppendText(
                     Environment.NewLine +
                     Environment.NewLine +
@@ -806,11 +807,13 @@ internal sealed class ClipEditorForm : Form
                     progress);
             }
 
+            if (IsDisposed || Disposing) return;
             DialogResult = DialogResult.OK;
             Close();
         }
         catch (Exception exception)
         {
+            if (IsDisposed || Disposing) return;
             MessageBox.Show(
                 this,
                 exception.Message,
@@ -820,7 +823,7 @@ internal sealed class ClipEditorForm : Form
         }
         finally
         {
-            _exportButton.Enabled = true;
+            if (!IsDisposed && !Disposing) _exportButton.Enabled = true;
         }
     }
 
